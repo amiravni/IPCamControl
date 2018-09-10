@@ -7,27 +7,40 @@ Created on Thu Aug 17 17:05:22 2017
 
 '''
 TODO: 
-4. compress file if not deleted --> with another thread? 
 5. save also diff video
-6. add DEBUG mode to watch to video
 '''
+
+
+
 
 import numpy as np
 import cv2
 import time
 import datetime
 import requests
-from threading import Thread, Event, ThreadError
+from threading import Thread, ThreadError, Lock
 from ConfigParser import SafeConfigParser
 import shutil
 import os
+import subprocess
 
-HTTP_FLAG = True
+## constants
+STREAM_RTSP = 1
+STREAM_HTTP = 0
+
+## general params
+CALC_DIFFS = True
+DEBUG = False # Show video and diffs
+STREAM_TYPE = 'rtsp';
+VID_FPS = 12 ## changes on "main"
 TIME_RATIO = 1000.0
-MAX_SINGLE_VIDEO_TIME = 390
+MAX_SINGLE_VIDEO_TIME = 300
 MAIN_DIR = 'D:\\IPcam\\Recordings'
 REC_DIR = '\\Detection'
-BOX_WIDTH_HEIGHT = np.array([[0.5,0.5+0.3,0.05,0.05+0.4],[0.05,0.05+0.4,0.4,0.4+0.55],[0.8,0.8+0.18,0.45,0.45+0.5]])
+REC_DIR_2del = '\\noDetection'
+
+##diff params
+BOX_WIDTH_HEIGHT = np.array([[0.45,0.45+0.3,0.05,0.05+0.4],[0.05,0.05+0.4,0.4,0.4+0.55],[0.8,0.8+0.18,0.45,0.45+0.5]])
 BOX_WIDTH_HEIGHT_REF = np.array([0.6,0.6+0.1,0.6,0.6+0.1])
 NUM_OF_BOXES = len(BOX_WIDTH_HEIGHT)
 diffImage = [[np.zeros(1)],[np.zeros(1)],[np.zeros(1)]]  ###< --- how to do that automatically???
@@ -38,7 +51,22 @@ MIN_AVG_SCORE_MIN_MAX = [4,8]
 MIN_AVG_SCORE_RATIO = 1.5
 MIN_AVG_SCORE_SMALL_BOX_RATIO = 1.3
 MIN_ISSUE_COUNT = 3
+
+## file handle params
+global files2Handle
+global threadsLock
+class files2HandleClass:
+    name = []
+    nLen = 0
+files2Handle = files2HandleClass()
+threadsLock = Lock()
+FFMPEG_EXE_LOC = 'C:\\Program Files\\ffmpeg\\bin\\ffmpeg.exe'
+TIME2DELETE_SEC = 86400
+TIME2ACTIVATE_DELETE_SEC = MAX_SINGLE_VIDEO_TIME + 60
+
+
 startTime = time.time()
+
 
 class Cam():
 
@@ -47,12 +75,12 @@ class Cam():
 
     if url[0:4] == 'rtsp':
         self.stream = cv2.VideoCapture(url)
-        self.stream.set(cv2.cv.CV_CAP_PROP_FOURCC, cv2.cv.CV_FOURCC('H', '2', '6', '4'));
+        self.stream.set(cv2.CAP_PROP_FOURCC , cv2.VideoWriter_fourcc('H', '2', '6', '4'));
         #self.stream.get(cv2.cv.CV_CAP_PROP_BUFFERSIZE)
-        self.stream_type = 1        
+        self.stream_type = STREAM_RTSP        
     elif url[0:4] == 'http':
         self.stream = requests.get(url, stream=True)
-        self.stream_type = 0
+        self.stream_type = STREAM_HTTP
     self.thread_cancelled = False
     self.thread = Thread(target=self.run)
     self.sysTime = time.time()
@@ -68,7 +96,7 @@ class Cam():
     self.diffScoreVec = np.zeros(10)
     self.diffScore2Use = -1
     self.movmentDetection = 0
-    print "camera initialised"
+    print "camera initialized"
 #    fid = open(MAIN_DIR+'log_'+self.timeString+'.txt','w')                  
 #    print >>fid ,"START"
 #    fid.close()    
@@ -109,6 +137,8 @@ class Cam():
       return datetime.datetime.fromtimestamp( input_time ).strftime('%Y_%m_%d_%H_%M_%S')
 
   def handleLastVideo(self):
+    global files2Handle
+    global threadsLock
     if type(self.video) is int:
         return -1 
     else:
@@ -116,16 +146,33 @@ class Cam():
         if self.movmentDetection == 1:
             ### keep file
             shutil.move(self.fileName_video, MAIN_DIR+REC_DIR+'\\'+self.filename_short_video)
-            shutil.move(self.filename_log, MAIN_DIR+REC_DIR+'\\'+self.filename_short_log)            
+            shutil.move(self.filename_log, MAIN_DIR+REC_DIR+'\\'+self.filename_short_log)
+            threadsLock.acquire()
+            try:
+                print files2Handle.name, files2Handle.nLen
+                files2Handle.name.append(MAIN_DIR+REC_DIR+'\\'+self.filename_short_video)
+                files2Handle.nLen = files2Handle.nLen + 1  
+            finally:
+                threadsLock.release()         
             return 1
         else:
-            ### delete file
-            #os.remove(self.fileName_video) 
+#            ### delete file
+#            os.remove(self.fileName_video) 
+            ### keep file in other dir            
+            shutil.move(self.fileName_video, MAIN_DIR+REC_DIR_2del+'\\'+self.filename_short_video)
+            shutil.move(self.filename_log, MAIN_DIR+REC_DIR_2del+'\\'+self.filename_short_log)  
+            threadsLock.acquire()
+            try:
+                print files2Handle.name, files2Handle.nLen
+                files2Handle.name.append(MAIN_DIR+REC_DIR_2del+'\\'+self.filename_short_video)
+                files2Handle.nLen = files2Handle.nLen + 1  
+            finally:
+                threadsLock.release()              
             return 0
     
   def initVideo(self):
     height , width , layers =  self.img.shape
-    fourcc = cv2.cv.CV_FOURCC(*'XVID')
+    fourcc = cv2.VideoWriter_fourcc(*'XVID')
     self.firstSysTime = time.time()
     self.timeString = self.time2string(self.firstSysTime)
     self.filename_short_video = self.timeString+'.mkv'
@@ -135,7 +182,7 @@ class Cam():
     print self.fileName_video
     if type(self.video) is not int:
         self.video.release() 
-    self.video = cv2.VideoWriter(self.fileName_video,fourcc,4,(width,height))      
+    self.video = cv2.VideoWriter(self.fileName_video,fourcc,VID_FPS,(width,height))      
     self.add_image_to_video()
     fid = open(self.filename_log,'w')                  
     print >>fid ,self.timeString
@@ -144,7 +191,7 @@ class Cam():
   def getImage(self,bytes):
     stream_new_flag = 0
     img_tmp = 0
-    if self.stream_type == 0:
+    if self.stream_type == STREAM_HTTP:
         bytes+=self.stream.raw.read(1024)
         a = bytes.find('\xff\xd8')
         b = bytes.find('\xff\xd9')            
@@ -153,7 +200,7 @@ class Cam():
             bytes= bytes[b+2:]                
             stream_new_flag = 1
             img_tmp = cv2.imdecode(np.fromstring(jpg, dtype=np.uint8),cv2.IMREAD_COLOR)
-    elif self.stream_type == 1:
+    elif self.stream_type == STREAM_RTSP:
         ret, img_tmp = self.stream.read()
         if ret is True:
             stream_new_flag = 1
@@ -187,39 +234,47 @@ class Cam():
               self.img_last = self.img_curr
           
           ### calc diff image and score
-          height , width , layers =  self.img_curr_2show.shape
-          diffImageRef,diffScoreRef,meanDScoreRef = self.get_diff_and_score(BOX_WIDTH_HEIGHT_REF)   
-          self.diffScoreVec[0:-1] = self.diffScoreVec[1:]
-          self.diffScoreVec[-1] = diffScoreRef
-          if self.diffScoreVec[0] > 0:
-              self.diffScore2Use = np.mean(self.diffScoreVec) * MIN_AVG_SCORE_RATIO
-          for diffIdx in range(0,len(BOX_WIDTH_HEIGHT)):
-              diffImage[diffIdx] = np.zeros([int(height*(BOX_WIDTH_HEIGHT[diffIdx][1] - BOX_WIDTH_HEIGHT[diffIdx][0] )) , int(width*(BOX_WIDTH_HEIGHT[diffIdx][3] - BOX_WIDTH_HEIGHT[diffIdx][2] ))])
-              diffImage[diffIdx],diffScore[diffIdx],meanDScore[diffIdx] = self.get_diff_and_score(BOX_WIDTH_HEIGHT[diffIdx])
-              if self.diffScore2Use > 0 and diffScore[diffIdx] > self.diffScore2Use and meanDScore[diffIdx] > 0 and meanDScore[diffIdx] < 5:
-                  issue[diffIdx] =  issue[diffIdx] + 1
-              else:
-                  issue[diffIdx] =  max(0,issue[diffIdx] - 0.5)      
-          
+          if CALC_DIFFS:
+              height , width , layers =  self.img_curr_2show.shape
+              diffImageRef,diffScoreRef,meanDScoreRef = self.get_diff_and_score(BOX_WIDTH_HEIGHT_REF)   
+              self.diffScoreVec[0:-1] = self.diffScoreVec[1:]
+              self.diffScoreVec[-1] = diffScoreRef
+              if self.diffScoreVec[0] > 0:
+                  self.diffScore2Use = np.mean(self.diffScoreVec) * MIN_AVG_SCORE_RATIO
+              for diffIdx in range(0,len(BOX_WIDTH_HEIGHT)):
+                  diffImage[diffIdx] = np.zeros([int(height*(BOX_WIDTH_HEIGHT[diffIdx][1] - BOX_WIDTH_HEIGHT[diffIdx][0] )) , int(width*(BOX_WIDTH_HEIGHT[diffIdx][3] - BOX_WIDTH_HEIGHT[diffIdx][2] ))])
+                  diffImage[diffIdx],diffScore[diffIdx],meanDScore[diffIdx] = self.get_diff_and_score(BOX_WIDTH_HEIGHT[diffIdx])
+                  if self.diffScore2Use > 0 and diffScore[diffIdx] > self.diffScore2Use and meanDScore[diffIdx] > 0 and meanDScore[diffIdx] < 5:
+                      issue[diffIdx] =  issue[diffIdx] + 1
+                  else:
+                      issue[diffIdx] =  max(0,issue[diffIdx] - 0.5)      
+              
           ### copy image (Just if we want to change something on the image we save to video)
           self.img =  np.array(self.img_curr) #np.hstack(( np.array(self.img_curr) , np.array(self.img_last)))
           self.img_2show = np.array(self.img_curr_2show) #np.hstack(( np.array(self.img_curr_2show) , np.array(self.img_last)))
           
           ### Show image, save to video, and find issues
           if self.img_count > 1:
-              cv2.imshow('cam',self.img_2show)
-              for diffIdx in range(0,len(BOX_WIDTH_HEIGHT)):
-                  cv2.imshow(('diff'+str(diffIdx)),diffImage[diffIdx])
-              cv2.imshow('diffRef',diffImageRef)
-              print 'REF: ',self.diffScore2Use
-              if self.diffScore2Use > 0 and (diffScore > self.diffScore2Use).any() :
-                  currTimeString = self.time2string(time.time())                   
-                  print currTimeString ,diffScore,meanDScore,issue, 'REF: ',self.diffScore2Use
-                  fid = open(self.filename_log,'a+') 
-                  print >>fid ,currTimeString ,diffScore,meanDScore,issue, 'REF: ',self.diffScore2Use
-                  fid.close()
-              if sum(issue) > MIN_ISSUE_COUNT: #(issue> MIN_ISSUE_COUNT ).any():
-                  self.movmentDetection = 1
+              if DEBUG: 
+                  cv2.imshow('cam',self.img_2show)
+              if CALC_DIFFS:
+                  if DEBUG:
+                      for diffIdx in range(0,len(BOX_WIDTH_HEIGHT)):
+                          cv2.imshow(('diff'+str(diffIdx)),diffImage[diffIdx])
+                      cv2.imshow('diffRef',diffImageRef)
+                  #print 'REF: ',self.diffScore2Use
+                  if self.diffScore2Use > 0 and (diffScore > self.diffScore2Use).any() :
+                      currTimeString = self.time2string(time.time())                   
+                      #print currTimeString ,diffScore,meanDScore,issue, 'REF: ',self.diffScore2Use
+                      fid = open(self.filename_log,'a+') 
+                      print >>fid ,currTimeString ,diffScore,meanDScore,issue, 'REF: ',self.diffScore2Use
+                      fid.close()
+                  if sum(issue) > MIN_ISSUE_COUNT: #(issue> MIN_ISSUE_COUNT ).any():
+                      print "MOVEMENT DETECTED!"
+                      fid = open(self.filename_log,'a+') 
+                      print >>fid ,"MOVEMENT DETECTED!"
+                      fid.close()
+                      self.movmentDetection = 1
               self.add_image_to_video()
               
           
@@ -249,6 +304,80 @@ class Cam():
       time.sleep(1)
     return True
 
+
+
+class FileHandler():
+    
+  def __init__(self):
+    
+
+    self.thread_cancelled = False
+    self.thread = Thread(target=self.run)
+    print "FileHandler initialized"
+    
+  def start(self):
+    self.thread.start()
+    print "FileHandler started"
+    
+  def is_running(self):
+    return self.thread.isAlive()
+      
+    
+  def shut_down(self):
+    self.thread_cancelled = True
+    #block while waiting for thread to terminate
+    while self.thread.isAlive():
+      time.sleep(1)
+    return True   
+
+  def DeleteOldFiles(self,dir_to_search):
+    for dirpath, dirnames, filenames in os.walk(dir_to_search):
+       for file in filenames:
+          curpath = os.path.join(dirpath, file)
+          deltaTimeSeconds = time.time() - os.path.getmtime(curpath)
+          if deltaTimeSeconds > TIME2DELETE_SEC:
+              print "deleting: " + curpath
+              os.remove(curpath)
+
+  def run(self):
+      global files2Handle
+      global threadsLock 
+      command = [FFMPEG_EXE_LOC, '-i', 'fileName', '-c:v', 'libx264', '-tune', 'film', '-preset', 'fast', '-profile:v', 'high444', '-crf', '38', 'fileNameMP4','-c:a', 'copy']
+      lastDeleted = 0
+      while not self.thread_cancelled:        
+            threadsLock.acquire()
+            try:
+                if files2Handle.nLen > 0:
+                    filename_local = files2Handle.name[0]
+                    nLen_local = files2Handle.nLen
+                else:
+                    filename_local = ''
+                    nLen_local = 0
+            finally:
+                threadsLock.release()   
+            if nLen_local > 0:
+                name = ''.join(filename_local.split('.')[:-1])
+                output = '{}.mp4'.format(name)
+                command[2] = filename_local
+                command[13] = output
+                print command
+                subprocess.call(command) 
+                print "DONE ENCODING"
+                os.remove(filename_local) 
+                threadsLock.acquire()
+                try:
+                    files2Handle.name.remove(files2Handle.name[0])
+                    files2Handle.nLen = files2Handle.nLen - 1
+                finally:
+                    threadsLock.release()                 
+            else:
+                #print "Sleeping..."
+                time.sleep(10)
+                if time.time() - lastDeleted > TIME2ACTIVATE_DELETE_SEC:
+                    self.DeleteOldFiles(MAIN_DIR)
+                    self.DeleteOldFiles(MAIN_DIR+REC_DIR)
+                    self.DeleteOldFiles(MAIN_DIR+REC_DIR_2del)
+                    
   
     
 if __name__ == "__main__":
@@ -257,9 +386,17 @@ if __name__ == "__main__":
     print time.time()
     parser = SafeConfigParser()
     parser.read('.\\config.ini')
-    if HTTP_FLAG:    
+    if STREAM_TYPE == 'http':    
         url = parser.get('ipcamconfig', 'httpurl')
+        VID_FPS = 4
     else:
         url = parser.get('ipcamconfig', 'rtspurl')
+        VID_FPS = 12
+    if not os.path.exists(MAIN_DIR+REC_DIR):
+        os.makedirs(MAIN_DIR+REC_DIR)   
+    if not os.path.exists(MAIN_DIR+REC_DIR_2del):
+        os.makedirs(MAIN_DIR+REC_DIR_2del)          
     cam = Cam(url)
     cam.start()
+    _FileHandler = FileHandler()
+    _FileHandler.start()
