@@ -32,7 +32,7 @@ STREAM_HTTP = 0
 CALC_DIFFS = True
 DEBUG = False # Show video and diffs
 STREAM_TYPE = 'rtsp';
-VID_FPS = 12 ## changes on "main"
+VID_FPS = -1 ## changes on "main"
 TIME_RATIO = 1000.0
 MAX_SINGLE_VIDEO_TIME = 300
 MAIN_DIR = 'D:\\IPcam\\Recordings'
@@ -40,7 +40,7 @@ REC_DIR = '\\Detection'
 REC_DIR_2del = '\\noDetection'
 
 ##diff params
-BOX_WIDTH_HEIGHT = np.array([[0.45,0.45+0.3,0.05,0.05+0.4],[0.05,0.05+0.4,0.4,0.4+0.55],[0.8,0.8+0.18,0.45,0.45+0.5]])
+BOX_WIDTH_HEIGHT = np.array([[0.45,0.45+0.3,0.15,0.15+0.3],[0.05,0.05+0.4,0.4,0.4+0.55],[0.8,0.8+0.18,0.45,0.45+0.5]])
 BOX_WIDTH_HEIGHT_REF = np.array([0.6,0.6+0.1,0.6,0.6+0.1])
 NUM_OF_BOXES = len(BOX_WIDTH_HEIGHT)
 diffImage = [[np.zeros(1)],[np.zeros(1)],[np.zeros(1)]]  ###< --- how to do that automatically???
@@ -134,7 +134,7 @@ class Cam():
       return diffImage,diffScore,meanDScore
 
   def time2string(self,input_time):
-      return datetime.datetime.fromtimestamp( input_time ).strftime('%Y_%m_%d_%H_%M_%S')
+      return datetime.datetime.fromtimestamp( input_time ).strftime('%Y%m%d_%H%M%S')
 
   def handleLastVideo(self):
     global files2Handle
@@ -145,30 +145,24 @@ class Cam():
         self.video.release()         
         if self.movmentDetection == 1:
             ### keep file
-            shutil.move(self.fileName_video, MAIN_DIR+REC_DIR+'\\'+self.filename_short_video)
-            shutil.move(self.filename_log, MAIN_DIR+REC_DIR+'\\'+self.filename_short_log)
-            threadsLock.acquire()
-            try:
-                print files2Handle.name, files2Handle.nLen
-                files2Handle.name.append(MAIN_DIR+REC_DIR+'\\'+self.filename_short_video)
-                files2Handle.nLen = files2Handle.nLen + 1  
-            finally:
-                threadsLock.release()         
-            return 1
+            REC_DIR_TMP = REC_DIR
         else:
 #            ### delete file
-#            os.remove(self.fileName_video) 
-            ### keep file in other dir            
-            shutil.move(self.fileName_video, MAIN_DIR+REC_DIR_2del+'\\'+self.filename_short_video)
-            shutil.move(self.filename_log, MAIN_DIR+REC_DIR_2del+'\\'+self.filename_short_log)  
-            threadsLock.acquire()
-            try:
-                print files2Handle.name, files2Handle.nLen
-                files2Handle.name.append(MAIN_DIR+REC_DIR_2del+'\\'+self.filename_short_video)
-                files2Handle.nLen = files2Handle.nLen + 1  
-            finally:
-                threadsLock.release()              
-            return 0
+#            os.remove(self.fileName_video)
+#            return self.movmentDetection
+            ### keep file in other dir      
+            REC_DIR_TMP = REC_DIR_2del
+        ### move file and save data for FileHandle thread
+        shutil.move(self.fileName_video, MAIN_DIR+REC_DIR_TMP+'\\'+self.filename_short_video)
+        shutil.move(self.filename_log, MAIN_DIR+REC_DIR_TMP+'\\'+self.filename_short_log)
+        threadsLock.acquire()
+        try:
+            files2Handle.name.append(MAIN_DIR+REC_DIR_TMP+'\\'+self.filename_short_video)
+            files2Handle.nLen = files2Handle.nLen + 1  
+            print files2Handle.name, files2Handle.nLen
+        finally:
+            threadsLock.release()         
+        return self.movmentDetection
     
   def initVideo(self):
     height , width , layers =  self.img.shape
@@ -213,11 +207,11 @@ class Cam():
         ### Init Video after X seconds
         if self.img_count == 1:
             reslt = self.handleLastVideo()
-            if reslt != -1:
-              fid = open(self.filename_log,'a+') 
-              print >>fid ,'HANDLE RESULTS: ' , reslt
-              print >>fid ,'HANDLE RESULTS: ' , reslt
-              fid.close()
+            #if reslt != -1:
+              #fid = open(self.filename_log,'a+') 
+              #print >>fid ,'HANDLE RESULTS: ' , reslt
+              #print >>fid ,'HANDLE RESULTS: ' , reslt
+              #fid.close()
             self.initVideo()
             issue[0:] = issue[0:]*0
             self.movmentDetection = 0
@@ -264,17 +258,22 @@ class Cam():
                       cv2.imshow('diffRef',diffImageRef)
                   #print 'REF: ',self.diffScore2Use
                   if self.diffScore2Use > 0 and (diffScore > self.diffScore2Use).any() :
-                      currTimeString = self.time2string(time.time())                   
-                      #print currTimeString ,diffScore,meanDScore,issue, 'REF: ',self.diffScore2Use
-                      fid = open(self.filename_log,'a+') 
-                      print >>fid ,currTimeString ,diffScore,meanDScore,issue, 'REF: ',self.diffScore2Use
-                      fid.close()
+                      if sum(issue) > 0 or (diffScore > 2*self.diffScore2Use).any():
+                          currTimeString = self.time2string(time.time())                   
+                          #print currTimeString ,diffScore,meanDScore,issue, 'REF: ',self.diffScore2Use
+                          fid = open(self.filename_log,'a+') 
+                          print >>fid ,currTimeString ,diffScore,meanDScore,issue, 'REF: ',self.diffScore2Use
+                          fid.close()
                   if sum(issue) > MIN_ISSUE_COUNT: #(issue> MIN_ISSUE_COUNT ).any():
-                      print "MOVEMENT DETECTED!"
-                      fid = open(self.filename_log,'a+') 
-                      print >>fid ,"MOVEMENT DETECTED!"
-                      fid.close()
+                      if self.movmentDetection is not 1:
+                          print "/n ############## MOVEMENT DETECTED! ############## /n"
+                          fid = open(self.filename_log,'a+') 
+                          print >>fid ,"/n ############## MOVEMENT DETECTED! ############## /n"
+                          fid.close()
                       self.movmentDetection = 1
+                      height , width , layers =  self.img.shape
+                      cv2.rectangle(self.img, (int(width*0), int(height*0)), (int(width*1), int(height*1)), (0, 0, 255), 10)
+
               self.add_image_to_video()
               
           
@@ -342,7 +341,7 @@ class FileHandler():
   def run(self):
       global files2Handle
       global threadsLock 
-      command = [FFMPEG_EXE_LOC, '-i', 'fileName', '-c:v', 'libx264', '-tune', 'film', '-preset', 'fast', '-profile:v', 'high444', '-crf', '38', 'fileNameMP4','-c:a', 'copy']
+      command = [FFMPEG_EXE_LOC, '-i', 'fileName', '-c:v', 'libx264', '-tune', 'film', '-preset', 'fast', '-profile:v', 'high444', '-crf', '38', 'fileNameMP4','-c:a', 'copy','-loglevel', 'error']
       lastDeleted = 0
       while not self.thread_cancelled:        
             threadsLock.acquire()
@@ -360,9 +359,9 @@ class FileHandler():
                 output = '{}.mp4'.format(name)
                 command[2] = filename_local
                 command[13] = output
-                print command
+                print "START ENCODING: "+filename_local[len(MAIN_DIR):]+" --> " + output[len(MAIN_DIR):]
                 subprocess.call(command) 
-                print "DONE ENCODING"
+                print "DONE ENCODING: "+filename_local[len(MAIN_DIR):]+" --> " + output[len(MAIN_DIR):]
                 os.remove(filename_local) 
                 threadsLock.acquire()
                 try:
@@ -381,7 +380,7 @@ class FileHandler():
   
     
 if __name__ == "__main__":
-    print time.time()    
+    #print time.time()    
     #time.sleep(3600*3)    
     print time.time()
     parser = SafeConfigParser()
@@ -391,7 +390,7 @@ if __name__ == "__main__":
         VID_FPS = 4
     else:
         url = parser.get('ipcamconfig', 'rtspurl')
-        VID_FPS = 12
+        VID_FPS = 13
     if not os.path.exists(MAIN_DIR+REC_DIR):
         os.makedirs(MAIN_DIR+REC_DIR)   
     if not os.path.exists(MAIN_DIR+REC_DIR_2del):
