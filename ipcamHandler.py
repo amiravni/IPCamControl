@@ -25,6 +25,7 @@ import os
 import subprocess
 
 ## constants
+STREAM_SIM = 2
 STREAM_RTSP = 1
 STREAM_HTTP = 0
 
@@ -38,19 +39,30 @@ MAX_SINGLE_VIDEO_TIME = 300
 MAIN_DIR = 'D:\\IPcam\\Recordings'
 REC_DIR = '\\Detection'
 REC_DIR_2del = '\\noDetection'
+sim_fileName = 'D:\\IPcam\\__Recordings'+REC_DIR_2del+'\\20180911_182509.mp4'
 
 ##diff params
-BOX_WIDTH_HEIGHT = np.array([[0.45,0.45+0.3,0.15,0.15+0.3],[0.05,0.05+0.4,0.4,0.4+0.55],[0.8,0.8+0.18,0.45,0.45+0.5]])
-BOX_WIDTH_HEIGHT_REF = np.array([0.6,0.6+0.1,0.6,0.6+0.1])
+BOX_WIDTH_HEIGHT = np.array([[0.55,0.55+0.25,0.15,0.15+0.3],[0.05,0.05+0.4,0.4,0.4+0.55],[0.8,0.8+0.18,0.45,0.45+0.5]])
+#BOX_WIDTH_HEIGHT =  np.array([[0.05,0.05+0.3,0.05,0.05+0.3]])
+BOX_WIDTH_HEIGHT_REF = np.array([0.5,0.5+0.2,0.6,0.6+0.3])
 NUM_OF_BOXES = len(BOX_WIDTH_HEIGHT)
-diffImage = [[np.zeros(1)],[np.zeros(1)],[np.zeros(1)]]  ###< --- how to do that automatically???
+diffImage = [np.zeros(1) for _ in range(NUM_OF_BOXES)]
 diffScore = np.zeros(NUM_OF_BOXES)
 meanDScore = np.zeros(NUM_OF_BOXES)
 issue = np.zeros(NUM_OF_BOXES)
-MIN_AVG_SCORE_MIN_MAX = [4,8]
+MIN_AVG_SCORE_MIN_MAX = [1,8]
 MIN_AVG_SCORE_RATIO = 1.5
+MIN_AVG_SCORE_RATIO_ADD = 1
 MIN_AVG_SCORE_SMALL_BOX_RATIO = 1.3
+MIN_AVG_SCORE_SMALL_BOX_RATIO_ADD = 1
+MAX_AVG_SCORE_REF_DAY = 3
+MAX_AVG_SCORE_REF_NIGHT = 10
 MIN_ISSUE_COUNT = 3
+
+RESIZE_ORG = 4
+REF_WINDOW_LEN = 64
+REF_WINDOW_LEN_LOG = np.log2(REF_WINDOW_LEN).astype('uint8') ## for fast div/mul
+
 
 ## file handle params
 global files2Handle
@@ -81,21 +93,29 @@ class Cam():
     elif url[0:4] == 'http':
         self.stream = requests.get(url, stream=True)
         self.stream_type = STREAM_HTTP
+    elif url[0:3] == 'sim':
+        self.stream = cv2.VideoCapture(sim_fileName)
+        self.stream.set(cv2.CAP_PROP_POS_FRAMES,130);
+        self.stream_type = STREAM_SIM
     self.thread_cancelled = False
     self.thread = Thread(target=self.run)
     self.sysTime = time.time()
     self.firstSysTime = self.sysTime
     self.timeString = datetime.datetime.fromtimestamp( self.firstSysTime ).strftime('%Y_%m_%d_%H_%M_%S')
-    self.img = -1
+    #self.img = -1
+    self.img_lrg = -1
     self.img_2show = -1
     self.img_curr = -1
     self.img_curr_2show = -1
+    self.img_last_vec = []
     self.img_last = -1
     self.img_count = -1
     self.video = -1
+    self.video_mov = -1
     self.diffScoreVec = np.zeros(10)
     self.diffScore2Use = -1
     self.movmentDetection = 0
+    self.isDay = True
     print "camera initialized"
 #    fid = open(MAIN_DIR+'log_'+self.timeString+'.txt','w')                  
 #    print >>fid ,"START"
@@ -107,19 +127,34 @@ class Cam():
     self.thread.start()
     print "camera stream started"
 
-  def add_image_to_video(self):
-    self.video.write(self.img)
-    self.img_count = self.img_count + 1
+  def add_image_to_video(self,flag):
+    if flag == 0:
+        self.video.write(self.img_lrg)
+        self.img_count = self.img_count + 1
+    else:
+        self.video_mov.write(self.img_lrg)
     #print (time.time() - self.sysTime)*TIME_RATIO
     self.sysTime = time.time()
-  
+
+
   def get_diff_and_score(self,box):
       height , width , layers =  self.img_curr_2show.shape
       cv2.rectangle(self.img_curr_2show, (int(width*box[0]), int(height*box[2])), (int(width*box[1]), int(height*box[3])), (0, 0, 255), 2)
-      gray_curr = cv2.cvtColor(self.img_curr[int(height*box[2]): int(height*box[3]) , int(width*box[0]): int(width*box[1])], cv2.COLOR_BGR2GRAY)  
-      gray_last = cv2.cvtColor(self.img_last[int(height*box[2]): int(height*box[3]) , int(width*box[0]): int(width*box[1])], cv2.COLOR_BGR2GRAY)   
-      diffImage = cv2.absdiff(gray_curr,gray_last)
+      gray_curr = cv2.cvtColor(self.img_curr[int(height*box[2]): int(height*box[3]) , int(width*box[0]): int(width*box[1])], cv2.COLOR_BGR2LAB)
+      gray_last = cv2.cvtColor(self.img_last[int(height*box[2]): int(height*box[3]) , int(width*box[0]): int(width*box[1])], cv2.COLOR_BGR2LAB)
+      #print(gray_curr.shape)      
+      diffImage1 = cv2.absdiff(gray_curr[0:,0:,1],gray_last[0:,0:,1])
+      diffImage2 = cv2.absdiff(gray_curr[0:,0:,2],gray_last[0:,0:,2])
+      diffImage = (diffImage1 + diffImage2 ) << 1
+      #print(diffImage.shape)
       diffScore = np.mean(diffImage)
+      if diffScore == 0:
+          self.isDay = False
+          diffImage = cv2.absdiff(gray_curr[0:,0:,0],gray_last[0:,0:,0])
+          diffScore = np.mean(diffImage)
+      else:
+          self.isDay = True
+      
       meanDScore = -1
       if self.diffScore2Use > 0 and diffScore > min(max(self.diffScore2Use,MIN_AVG_SCORE_MIN_MAX[0]),MIN_AVG_SCORE_MIN_MAX[1]):
           diffWidth = diffImage[0,:].size
@@ -130,7 +165,8 @@ class Cam():
           meanD[2] = np.mean(diffImage[0:int(diffWidth/2),0:int(diffHeight/2)])
           meanD[3] = np.mean(diffImage[int(diffWidth/2):-1,int(diffHeight/2):-1])
           meanD[4] = np.mean(diffImage[int(diffWidth/4):int(3*diffWidth/4),int(diffHeight/4):int(3*diffHeight/4)])
-          meanDScore = sum(meanD>(self.diffScore2Use*MIN_AVG_SCORE_SMALL_BOX_RATIO))
+          meanDScore = sum((meanD - MIN_AVG_SCORE_SMALL_BOX_RATIO_ADD)>(self.diffScore2Use*MIN_AVG_SCORE_SMALL_BOX_RATIO))
+      #print box[0],diffScore,meanDScore,self.diffScore2Use
       return diffImage,diffScore,meanDScore
 
   def time2string(self,input_time):
@@ -142,7 +178,8 @@ class Cam():
     if type(self.video) is int:
         return -1 
     else:
-        self.video.release()         
+        self.video.release()       
+        self.video_mov.release() 
         if self.movmentDetection == 1:
             ### keep file
             REC_DIR_TMP = REC_DIR
@@ -161,23 +198,44 @@ class Cam():
             files2Handle.nLen = files2Handle.nLen + 1  
             print files2Handle.name, files2Handle.nLen
         finally:
-            threadsLock.release()         
+            threadsLock.release() 
+            
+        if self.movmentDetection == 1:
+            shutil.move(self.fileName_video_mov, MAIN_DIR+REC_DIR_TMP+'\\'+self.filename_short_video_mov)
+            threadsLock.acquire()
+            try:
+                files2Handle.name.append(MAIN_DIR+REC_DIR_TMP+'\\'+self.filename_short_video_mov)
+                files2Handle.nLen = files2Handle.nLen + 1  
+                print files2Handle.name, files2Handle.nLen
+            finally:
+                threadsLock.release() 
+        else:
+            os.remove(self.fileName_video_mov)
+                        
+            
+            
         return self.movmentDetection
     
   def initVideo(self):
-    height , width , layers =  self.img.shape
+    height , width , layers =  self.img_lrg.shape
     fourcc = cv2.VideoWriter_fourcc(*'XVID')
     self.firstSysTime = time.time()
     self.timeString = self.time2string(self.firstSysTime)
     self.filename_short_video = self.timeString+'.mkv'
+    self.filename_short_video_mov = self.timeString+'_mov.mkv'
     self.filename_short_log = self.timeString+'_log.txt'     
     self.fileName_video = MAIN_DIR+'\\'+self.filename_short_video
+    self.fileName_video_mov = MAIN_DIR+'\\'+self.filename_short_video_mov
     self.filename_log = MAIN_DIR+'\\'+self.filename_short_log
     print self.fileName_video
     if type(self.video) is not int:
         self.video.release() 
-    self.video = cv2.VideoWriter(self.fileName_video,fourcc,VID_FPS,(width,height))      
-    self.add_image_to_video()
+    if type(self.video_mov) is not int:
+        self.video.release()         
+    self.video = cv2.VideoWriter(self.fileName_video,fourcc,VID_FPS,(width,height))
+    self.video_mov = cv2.VideoWriter(self.fileName_video_mov,fourcc,VID_FPS,(width,height))      
+    self.add_image_to_video(0)
+    self.add_image_to_video(1)
     fid = open(self.filename_log,'w')                  
     print >>fid ,self.timeString
     fid.close()    
@@ -198,10 +256,16 @@ class Cam():
         ret, img_tmp = self.stream.read()
         if ret is True:
             stream_new_flag = 1
+    elif self.stream_type == STREAM_SIM:
+        ret, img_tmp = self.stream.read()
+        if ret is True:
+            stream_new_flag = 1  
     return stream_new_flag , img_tmp , bytes   
 
   def run(self):
     bytes=''
+    img_last_tmp = -1
+    tic = time.time()
     while not self.thread_cancelled:
       try:
         ### Init Video after X seconds
@@ -217,12 +281,34 @@ class Cam():
             self.movmentDetection = 0
         
         ### get new Image
-        stream_new_flag , img_tmp , bytes = self.getImage(bytes)
+        #print(time.time() - tic)
+        stream_new_flag , img_tmp_lrg , bytes = self.getImage(bytes)
+        #tic = time.time()
+        img_tmp = img_tmp_lrg[0::RESIZE_ORG,0::RESIZE_ORG,0:]
         
         if stream_new_flag == 1:
           ### copy image to class
-          self.img_last = self.img_curr
+          if len(self.img_last_vec) is 0:
+              self.img_last_vec.append(img_tmp.astype('uint16'))
+              img_last_tmp = self.img_last_vec[0].copy()
+          else:
+              if len(self.img_last_vec) == REF_WINDOW_LEN:
+                  img_last_tmp = img_last_tmp - self.img_last_vec[0]
+                  self.img_last_vec.remove(self.img_last_vec[0])
+              self.img_last_vec.append((self.img_curr).astype('uint16'))
+              img_last_tmp = img_last_tmp + self.img_last_vec[-1]      
+          #self.img_last = ((sum(np.array(self.img_last_vec)))/len(self.img_last_vec) )
+          
+          if len(self.img_last_vec) == REF_WINDOW_LEN:
+              self.img_last = (img_last_tmp >> REF_WINDOW_LEN_LOG).astype('uint8')#
+          else:
+              self.img_last = (img_last_tmp / len(self.img_last_vec)).astype('uint8')
+          #print(np.min(self.img_last),np.max(self.img_last),len(self.img_last_vec) )
+          #print(np.min(img_tmp),np.max(img_tmp))
+          
+          #self.img_last = self.img_curr
           self.img_curr = img_tmp
+          self.img_lrg = img_tmp_lrg
           self.img_curr_2show = (self.img_curr).copy()
           if type(self.img_last) is int:
               self.img_last = self.img_curr
@@ -235,30 +321,37 @@ class Cam():
               self.diffScoreVec[-1] = diffScoreRef
               if self.diffScoreVec[0] > 0:
                   self.diffScore2Use = np.mean(self.diffScoreVec) * MIN_AVG_SCORE_RATIO
-              for diffIdx in range(0,len(BOX_WIDTH_HEIGHT)):
+                  if self.isDay is True and self.diffScore2Use > MAX_AVG_SCORE_REF_DAY:
+                      self.diffScore2Use = 999999
+                  if self.isDay is False and self.diffScore2Use > MAX_AVG_SCORE_REF_NIGHT:
+                      self.diffScore2Use = 999999                      
+              for diffIdx in range(0,NUM_OF_BOXES):
                   diffImage[diffIdx] = np.zeros([int(height*(BOX_WIDTH_HEIGHT[diffIdx][1] - BOX_WIDTH_HEIGHT[diffIdx][0] )) , int(width*(BOX_WIDTH_HEIGHT[diffIdx][3] - BOX_WIDTH_HEIGHT[diffIdx][2] ))])
                   diffImage[diffIdx],diffScore[diffIdx],meanDScore[diffIdx] = self.get_diff_and_score(BOX_WIDTH_HEIGHT[diffIdx])
-                  if self.diffScore2Use > 0 and diffScore[diffIdx] > self.diffScore2Use and meanDScore[diffIdx] > 0 and meanDScore[diffIdx] < 5:
+                  if self.diffScore2Use > 0 and (diffScore[diffIdx] - MIN_AVG_SCORE_RATIO_ADD) > self.diffScore2Use and meanDScore[diffIdx] > 0 and meanDScore[diffIdx] < 5:
                       issue[diffIdx] =  issue[diffIdx] + 1
+                      #print "\n ############## ISSUE! ############## \n"
                   else:
                       issue[diffIdx] =  max(0,issue[diffIdx] - 0.5)      
               
           ### copy image (Just if we want to change something on the image we save to video)
-          self.img =  np.array(self.img_curr) #np.hstack(( np.array(self.img_curr) , np.array(self.img_last)))
+          #self.img =  np.array(self.img_curr) #np.hstack(( np.array(self.img_curr) , np.array(self.img_last)))
           self.img_2show = np.array(self.img_curr_2show) #np.hstack(( np.array(self.img_curr_2show) , np.array(self.img_last)))
-          
+           
           ### Show image, save to video, and find issues
           if self.img_count > 1:
               if DEBUG: 
                   cv2.imshow('cam',self.img_2show)
+                  #cv2.moveWindow('cam',)
+                  #cv2.imshow('camLast',self.img_last)
               if CALC_DIFFS:
                   if DEBUG:
-                      for diffIdx in range(0,len(BOX_WIDTH_HEIGHT)):
+                      for diffIdx in range(0,NUM_OF_BOXES):
                           cv2.imshow(('diff'+str(diffIdx)),diffImage[diffIdx])
                       cv2.imshow('diffRef',diffImageRef)
                   #print 'REF: ',self.diffScore2Use
                   if self.diffScore2Use > 0 and (diffScore > self.diffScore2Use).any() :
-                      if sum(issue) > 0 or (diffScore > 2*self.diffScore2Use).any():
+                      #if sum(issue) > 0 or (diffScore > 2*self.diffScore2Use).any():
                           currTimeString = self.time2string(time.time())                   
                           #print currTimeString ,diffScore,meanDScore,issue, 'REF: ',self.diffScore2Use
                           fid = open(self.filename_log,'a+') 
@@ -266,15 +359,16 @@ class Cam():
                           fid.close()
                   if sum(issue) > MIN_ISSUE_COUNT: #(issue> MIN_ISSUE_COUNT ).any():
                       if self.movmentDetection is not 1:
-                          print "/n ############## MOVEMENT DETECTED! ############## /n"
+                          print "\n ############## MOVEMENT DETECTED! ############## \n"
                           fid = open(self.filename_log,'a+') 
-                          print >>fid ,"/n ############## MOVEMENT DETECTED! ############## /n"
+                          print >>fid ,"\n ############## MOVEMENT DETECTED! ############## \n"
                           fid.close()
                       self.movmentDetection = 1
-                      height , width , layers =  self.img.shape
-                      cv2.rectangle(self.img, (int(width*0), int(height*0)), (int(width*1), int(height*1)), (0, 0, 255), 10)
-
-              self.add_image_to_video()
+                      height , width , layers =  self.img_lrg.shape
+                      cv2.rectangle(self.img_lrg, (int(width*0), int(height*0)), (int(width*1), int(height*1)), (0, 0, 255), 10)
+                      self.add_image_to_video(1)
+              
+              self.add_image_to_video(0)
               
           
           ### first time (no "diff" image)
@@ -290,6 +384,7 @@ class Cam():
       except ThreadError:
         self.thread_cancelled = True
         self.video.release() 
+        self.video_mov.release() 
 
 
   def is_running(self):
@@ -360,9 +455,12 @@ class FileHandler():
                 command[2] = filename_local
                 command[13] = output
                 print "START ENCODING: "+filename_local[len(MAIN_DIR):]+" --> " + output[len(MAIN_DIR):]
-                subprocess.call(command) 
-                print "DONE ENCODING: "+filename_local[len(MAIN_DIR):]+" --> " + output[len(MAIN_DIR):]
-                os.remove(filename_local) 
+                try:                
+                    subprocess.call(command)
+                    print "DONE ENCODING: "+filename_local[len(MAIN_DIR):]+" --> " + output[len(MAIN_DIR):]
+                    os.remove(filename_local)
+                except:
+                    print "ERROR ENCODING: "+filename_local[len(MAIN_DIR):]+" --> " + output[len(MAIN_DIR):]
                 threadsLock.acquire()
                 try:
                     files2Handle.name.remove(files2Handle.name[0])
@@ -388,8 +486,11 @@ if __name__ == "__main__":
     if STREAM_TYPE == 'http':    
         url = parser.get('ipcamconfig', 'httpurl')
         VID_FPS = 4
-    else:
+    elif STREAM_TYPE == 'rtsp':
         url = parser.get('ipcamconfig', 'rtspurl')
+        VID_FPS = 13
+    elif STREAM_TYPE == 'sim':
+        url = 'sim'
         VID_FPS = 13
     if not os.path.exists(MAIN_DIR+REC_DIR):
         os.makedirs(MAIN_DIR+REC_DIR)   
