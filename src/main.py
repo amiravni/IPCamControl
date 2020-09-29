@@ -1,38 +1,33 @@
 import time
 from ImageHandler import ImageHandler, ImageShow
 from FilesHandler import FilesHandler
-from config import *
+from cfg import *
 import os
+from utils import utils
+
 
 def make_dirs():
-    ALL_DIRS = [MAIN_DIR,
-                MAIN_DIR + REC_DIR,
-                MAIN_DIR + REC_DIR + REC_DIR_COMPRESSED,
-                MAIN_DIR + REC_DIR + REC_DIR_COMPRESSED_WITH_NN,
-                MAIN_DIR + REC_DIR + REC_DIR_COMPRESSED_FOR_NN,
-                MAIN_DIR + REC_DIR_2del,
-                MAIN_DIR + REC_DIR_2del + REC_DIR_COMPRESSED,
-                MAIN_DIR + REC_DIR_2del + REC_DIR_COMPRESSED_WITH_NN,
-                MAIN_DIR + REC_DIR_2del + REC_DIR_COMPRESSED_FOR_NN
-                ]
-    for _dir in ALL_DIRS:
+    def make_dir_if_not_exist(_dir):
         if not os.path.exists(_dir):
             os.makedirs(_dir)
 
+    DH = utils.DirsHandler(DIRS)
+    DH.exec_func(make_dir_if_not_exist)
 
 if __name__ == '__main__':
     make_dirs()
-    IH = ImageHandler(debug=True).start()
-    if DEBUG:
-        IS = ImageShow(IH, debug=True).start()
-    video_types = ['_main', '_mov', '_debug']
-    FH = []
-    for v_type in video_types:
-        if v_type == '_mov':
-            FH.append(FilesHandler(MAIN_DIR + REC_DIR, substring=v_type, delete_org=False, debug=True).start())
-        else:
-            FH.append(FilesHandler(MAIN_DIR + REC_DIR, substring=v_type, debug=True).start())
+    if FH_ENABLE:
+        FH = []
+        DH = utils.DirsHandler(DIRS)
+        FH.append(FilesHandler(DH.all_dirs['diff_detection'], substring='_mov', delete_org=False, debug=True).start())
+        FH.append(FilesHandler(DH.all_dirs['diff_detection'], substring='_main', debug=True).start())
+        FH.append(FilesHandler(DH.all_dirs['diff_detection'], substring='_debug', debug=True).start())
+        FH.append(FilesHandler(DH.all_dirs['no_diff_detection'], substring='_main', debug=True).start()) #TODO: Disable in the future
+        FH.append(FilesHandler(DH.all_dirs['no_diff_detection'], substring='_debug', debug=True).start()) #TODO: Disable in the futur
 
-        FH.append(FilesHandler(MAIN_DIR + REC_DIR_2del, substring=v_type, debug=True).start())
+    IH = ImageHandler(debug=True).start()
+    if SHOW_STREAM:
+        IS = ImageShow(IH, debug=True).start()
+    LOGGER.info('AMIR IPCAM VERSION {} IS READY'.format(VERSION))
     while True:
         time.sleep(10000)

@@ -1,0 +1,8 @@
+/src/darknet
+/src/logs/*.log
+/src/cfg/config.py
+/venv
+/recordings
+/sim
+/tmp
+/.idea

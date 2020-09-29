@@ -1,7 +1,5 @@
 import shutil
-from threading import Thread
-import cv2
-from config import *
+from cfg import *
 
 class VideosListHandler:
     def __init__(self):
@@ -57,6 +55,9 @@ class VideoHandler:
 
     def close_and_move(self, new_path=''):
         self.close_video()
+        if new_path == 'delete':
+            os.remove(self.video_path)
+            return
         if len(new_path) > 0:
             if new_path[-1] != '/':
                 new_path = new_path + '/'

@@ -1,7 +1,7 @@
-import cv2
-import numpy as np
-from config import *
-import utils
+from cfg import *
+from utils import utils
+
+
 #import pyprofilers as pp
 #@pp.profile_by_line(exit=1)
 
