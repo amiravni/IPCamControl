@@ -6,9 +6,9 @@ import os
 import subprocess
 from utils import utils
 from image_processing.ClassifiersHandler import DarkNetClassifier
+import traceback
 
-
-class FilesHandler():
+class FilesHandlerRT():
 
     def __init__(self, basepath, substring='.', make_mov_vid=False, delete_org=True, debug=False):
 
@@ -18,7 +18,7 @@ class FilesHandler():
         self.make_mov_vid = make_mov_vid
         self.debug = debug
         self.thread_cancelled = False
-        self.ffmpeg_command = FFMPEG_COMMAND.copy()
+        self.ffmpeg_command = FFMPEG_PARAMS['command'].copy()
         self.dirs = utils.DirsHandler(DIRS)
         LOGGER.info("FileHandler initialized at {} with substring {}".format(self.basepath, self.substring))
 
@@ -37,16 +37,6 @@ class FilesHandler():
         while self.thread.isAlive():
             time.sleep(1)
         return True
-
-    def DeleteOldFiles(self, dir_to_search):
-        for dirpath, dirnames, filenames in os.walk(dir_to_search):
-            for file in filenames:
-                curpath = os.path.join(dirpath, file)
-                deltaTimeSeconds = time.time() - os.path.getmtime(curpath)
-                if deltaTimeSeconds > TIME2DELETE_SEC:
-                    self.Print("deleting: " + curpath)
-                    os.remove(curpath)
-
 
     # def make_mov_vid_func(self, basepath, vid_name):
     #     if STREAM_TYPE == 'sim':
@@ -88,7 +78,6 @@ class FilesHandler():
 
         command = self.ffmpeg_command
         basepath = self.basepath
-        lastDeleted = 0.0
         if self.substring == '_mov':
             DNC = DarkNetClassifier().start()
         while not self.thread_cancelled:
@@ -126,58 +115,54 @@ class FilesHandler():
             if not encoding:
                 time.sleep(10)
 
+class FilesHandlerNonRT():
+    def __init__(self, dir_key, max_history=FILES['max_history_detected'], debug=False):
+        self.dirs = utils.DirsHandler(DIRS)
+        self.dir_key = dir_key
+        self.max_history = max_history
+        self.main_dir = self.dirs.get_path_string(self.dir_key)
+        self.debug = debug
+        LOGGER.info("FileHandlerNonRT initialized with key {}".format(self.dir_key))
 
-    def run(self):
-        global files2Handle
-        global threadsLock
-        command = FFMPEG_COMMAND
-        lastDeleted = 0
-        cnt = 0
+    def start(self):
+        self.thread = Thread(target=self.update)
+        self.thread.daemon = False
+        self.thread_cancelled = False
+        self.thread.start()
+        return self
+
+    def is_alive(self):
+        return self.thread.isAlive()
+
+    def shut_down(self):
+        self.thread_cancelled = True
+        # block while waiting for thread to terminate
+        while self.thread.isAlive():
+            time.sleep(1)
+        return True
+
+    def delete_old_files(self):
+        for dirpath, dirnames, filenames in os.walk(self.main_dir):
+            for file in filenames:
+                curpath = os.path.join(dirpath, file)
+                dt_sec = time.time() - os.path.getmtime(curpath)
+                if dt_sec > self.max_history:
+                    LOGGER.info("deleting: " + curpath)
+                    os.remove(curpath)
+
+    def update(self):
         while not self.thread_cancelled:
-            threadsLock.acquire()
             try:
-                if files2Handle.nLen > 0:
-                    filename_local = files2Handle.name[0]
-                    nLen_local = files2Handle.nLen
-                else:
-                    filename_local = ''
-                    nLen_local = 0
-            finally:
-                threadsLock.release()
-            if nLen_local > 0 and files2Handle.afterNN[
-                0] is True:  ### <---- files2Handle.afterNN[0] is True: need to deal with list afterNN
-                name = ''.join(filename_local.split('.mkv')[:-1])
-                output = '{}.mp4'.format(name)
-                command[2] = filename_local
-                command[13] = output
-                self.Print("START ENCODING: " +
-                           filename_local[len(self.dirs.all_dirs['main']):] +
-                           " --> " + output[len(self.dirs.all_dirs['main']):])
-                try:
-                    subprocess.call(command)
-                    self.Print("DONE ENCODING: " +
-                               filename_local[len(self.dirs.all_dirs['main']):] +
-                               " --> " + output[len(self.dirs.all_dirs['main']):])
-                    os.remove(filename_local)
-                except:
-                    self.Print("ERROR ENCODING: " +
-                               filename_local[len(self.dirs.all_dirs['main']):] +
-                               " --> " + output[len(self.dirs.all_dirs['main']):])
-                threadsLock.acquire()
-                try:
-                    files2Handle.name.remove(files2Handle.name[0])
-                    files2Handle.nLen = files2Handle.nLen - 1
-                finally:
-                    threadsLock.release()
-            else:
-                # print "Sleeping..."
-                time.sleep(10)
-                cnt += 1
-                if cnt > 20:
-                    print("FH --> checking for deleting files")
-                    cnt = 0
-                if time.time() - lastDeleted > TIME2ACTIVATE_DELETE_SEC:
-                    self.DeleteOldFiles(self.dirs.all_dirs['main'])
-                    self.DeleteOldFiles(self.dirs.all_dirs['diff_detection'])
-                    self.DeleteOldFiles(self.dirs.all_dirs['no_diff_detection'])
+                self.delete_old_files()
+            except:
+                LOGGER.error('FileHandlerNonRT: Problem!')
+                LOGGER.error(str(traceback.format_exc()))
+            time.sleep(MAX_SINGLE_VIDEO_TIME + 10)
 
+
+
+
+if __name__=='__main__':
+    FHNRT = FilesHandlerNonRT(dir_key='diff_detection', max_history=86400, debug=True).start()
+    while True:
+        time.sleep(10000)

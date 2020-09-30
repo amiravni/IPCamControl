@@ -1,5 +1,6 @@
-import shutil
 from cfg import *
+import cv2
+import shutil
 
 class VideosListHandler:
     def __init__(self):

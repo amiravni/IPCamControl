@@ -1,29 +1,26 @@
 import time
 from ImageHandler import ImageHandler, ImageShow
-from FilesHandler import FilesHandler
+from FilesHandler import FilesHandlerRT, FilesHandlerNonRT
 from cfg import *
 import os
 from utils import utils
 
-
-def make_dirs():
-    def make_dir_if_not_exist(_dir):
-        if not os.path.exists(_dir):
-            os.makedirs(_dir)
-
-    DH = utils.DirsHandler(DIRS)
-    DH.exec_func(make_dir_if_not_exist)
-
 if __name__ == '__main__':
-    make_dirs()
+    DH = utils.DirsHandler(DIRS)
+    DH.exec_func(utils.make_dir_if_not_exist)
     if FH_ENABLE:
         FH = []
+        FHNRT = []
         DH = utils.DirsHandler(DIRS)
-        FH.append(FilesHandler(DH.all_dirs['diff_detection'], substring='_mov', delete_org=False, debug=True).start())
-        FH.append(FilesHandler(DH.all_dirs['diff_detection'], substring='_main', debug=True).start())
-        FH.append(FilesHandler(DH.all_dirs['diff_detection'], substring='_debug', debug=True).start())
-        FH.append(FilesHandler(DH.all_dirs['no_diff_detection'], substring='_main', debug=True).start()) #TODO: Disable in the future
-        FH.append(FilesHandler(DH.all_dirs['no_diff_detection'], substring='_debug', debug=True).start()) #TODO: Disable in the futur
+        FH.append(FilesHandlerRT(DH.all_dirs['diff_detection'], substring='_mov', delete_org=False).start())
+        FH.append(FilesHandlerRT(DH.all_dirs['diff_detection'], substring='_main').start())
+        FH.append(FilesHandlerRT(DH.all_dirs['diff_detection'], substring='_debug').start())
+        FH.append(FilesHandlerRT(DH.all_dirs['no_diff_detection'], substring='_main').start())
+        FH.append(FilesHandlerRT(DH.all_dirs['no_diff_detection'], substring='_debug').start())
+        FHNRT.append(FilesHandlerNonRT(dir_key='diff_detection',
+                                       max_history=FILES['max_history_detected']).start())
+        FHNRT.append(FilesHandlerNonRT(dir_key='no_diff_detection',
+                                       max_history=FILES['max_history_not_detected']).start())
 
     IH = ImageHandler(debug=True).start()
     if SHOW_STREAM:

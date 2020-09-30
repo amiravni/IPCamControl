@@ -2,6 +2,7 @@ from threading import Thread
 from queue import Queue
 import time
 from cfg import *
+import cv2
 
 class CaptureHandler:
 	def __init__(self, path, stream_type='rtsp', sim_start_frame=0, queueSize=500, name='', fps=VID_FPS):
@@ -65,7 +66,7 @@ class CaptureHandler:
 					return
 				# add the frame to the queue
 				self.Q.put(frame)
-				if self.Q.qsize() > QUEUE_WARNING_LENGTH:
+				if self.Q.qsize() > GENERAL['queue_warning_length']:
 					LOGGER.warn('CAPTURE {}: Frame Queue size is {}'.format(str(self.name), str(self.Q.qsize())))
 
 	def read(self, timeout=5):

@@ -3,6 +3,8 @@ import datetime
 from pathlib import Path
 from glob import glob
 import json
+import shutil
+import time
 
 def time2string(input_time):
     return datetime.datetime.fromtimestamp(input_time).strftime('%Y%m%d_%H%M%S')
@@ -25,7 +27,7 @@ def is_intersect(veci, vecj, margin):
         return False
 
 
-def is_in_bb(center_of_mass, img_shape, bbox=None, box_wh=BOX_WIDTH_HEIGHT):
+def is_in_bb(center_of_mass, img_shape, bbox=None, box_wh=DIFF['box_wh']):
     height, width, layers = img_shape
     if bbox is not None:
         center_of_mass = (bbox[0]+int(bbox[2]/2), bbox[1]+int(bbox[3]/2))
@@ -74,7 +76,25 @@ def save_mov_info(frames, dir_path, filename):
     with open(join_strings_as_path([dir_path, filename+'.txt']), 'w') as f:
         f.write(json.dumps(final_frames))
 
-class DirsHandler: #TODO: add dictionary with all paths
+def make_dir_if_not_exist(_dir):
+    if not os.path.exists(_dir):
+        os.makedirs(_dir)
+
+def copy_all_video_refrences(video_name, dir_tree, target='final_detection', wait_ffmpeg=False):
+    target_path = join_strings_as_path([dir_tree.get_path_string(['final_detection']), video_name])
+    make_dir_if_not_exist(target_path)
+    vid_locations = dir_tree.find_files(video_name)
+    while wait_ffmpeg and \
+            any([os.path.dirname(idx) == dir_tree.sub_dirs['diff_detection'].curr_dir for idx in vid_locations]):
+        LOGGER.warning('Darknet finished but ffmpeg didnt, waiting a few seconds ({})'.format(video_name))
+        time.sleep(10)
+        vid_locations = dir_tree.find_files(video_name)
+    for file in vid_locations:
+        if os.path.isfile(file) and os.path.dirname(file) != target_path:
+            target_file_path = join_strings_as_path([target_path,os.path.basename(file)])
+            shutil.move(file, target_file_path, copy_function=shutil.copy2)
+
+class DirsHandler:
     def __init__(self, dir_dict, main_dir='', curr_key=''):
         try:
             if 'main_dir' in dir_dict:

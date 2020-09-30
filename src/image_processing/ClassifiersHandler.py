@@ -1,8 +1,10 @@
+
 from cfg import *
 import time
 from collections import deque
 from utils import utils
 from threading import Thread
+import cv2
 import os
 os.environ["DARKNET_PATH"] = './darknet/'
 #import sys
@@ -30,6 +32,7 @@ class DarkNetClassifier:
             batch_size=1
         )
 
+        self.search_box = DARKNET['search_box']
         self.width = darknet.network_width(self.network)
         self.height = darknet.network_height(self.network)
         self.darknet_image = darknet.make_image(self.width, self.height, 3)
@@ -110,7 +113,7 @@ class DarkNetClassifier:
             [detection for detection in detections if detection[0] in DARKNET['keep_categories']]
         tmp_detections2 = \
             [detection for detection in tmp_detections
-             if utils.is_in_bb(detection[2][0:2], self.resize_frame.shape) >= 0]
+             if utils.is_in_bb(detection[2][0:2], self.resize_frame.shape, box_wh=self.search_box) >= 0]
         for detection in tmp_detections2:
             skip_detection = False
             for known_fa in DARKNET['known_false_alarms']:
@@ -133,11 +136,10 @@ class DarkNetClassifier:
                     COM_1 = np.array([int(self.first_result[2][0]), int(self.first_result[2][1])])
                     COM_2 = np.array([int(det[2][0]), int(det[2][1])])
                     diag = np.sqrt(self.org_frame.shape[0]**2 + self.org_frame.shape[1]**2)
-                    #print(np.linalg.norm(COM_1 - COM_2))
+                    print(np.linalg.norm(COM_1 - COM_2))
                     if np.linalg.norm(COM_1 - COM_2) > diag * DARKNET['min_pct_from_first_res']:
                         return True
         return False
-
 
     def inference(self):
         detections = darknet.detect_image(self.network, self.class_names, self.darknet_image, thresh=self.thresh)
@@ -160,7 +162,7 @@ class DarkNetClassifier:
                     vid_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
                     vid_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
                     vid_sim_fps = int(cap.get(cv2.CAP_PROP_FPS))
-                    full_path = utils.join_strings_as_path([self.dirs.all_dirs['final_detection'], os.path.basename(vid_path)])
+                    full_path = utils.join_strings_as_path([self.dirs.all_dirs['final_detection'], os.path.basename(vid_path).split('.')[0] + '_NN.mkv'])
                     VH = VideoHandler(full_path, vid_height, vid_width, debug=True, vid_fps=vid_sim_fps)
                     found_counter = 0
                     debug_det = []
@@ -168,15 +170,15 @@ class DarkNetClassifier:
                     while True:
                         if self.video_capture(cap):
                             # if self.debug:
-                            #     self.org_frame = self.resize_frame
-                            #     vid_width = self.width
-                            #     vid_height = self.height
-                            #     self.org_frame = cv2.cvtColor(self.org_frame, cv2.COLOR_BGR2RGB)F
+                            #      self.org_frame = self.resize_frame
+                            #      vid_width = self.width
+                            #      vid_height = self.height
+                            #      self.org_frame = cv2.cvtColor(self.org_frame, cv2.COLOR_BGR2RGB)
                             detections = self.inference()
                             rel_detections = self.get_relevant_detections(detections)
                             if self.resize_frame is not None and \
-                                    (self.check_for_continuity(rel_detections)
-                                     or found_counter >= DARKNET['min_detection_to_save_file']):
+                                    (found_counter >= DARKNET['min_detection_to_save_file'] or
+                                     self.check_for_continuity(rel_detections)):
                                 found_counter += 1
                                 self.draw_boxes(rel_detections)
                                 VH.add_frame(self.org_frame)
@@ -186,7 +188,7 @@ class DarkNetClassifier:
                                 #if cv2.waitKey(1) == 27:
                                 #    break
                                 if self.debug:
-                                    for iii, box in enumerate(BOX_WIDTH_HEIGHT):
+                                    for iii, box in enumerate(self.search_box):
                                         w1 = int(vid_width * box[0])
                                         h1 = int(vid_height * box[2])
                                         w2 = int(vid_width * box[1])
@@ -209,6 +211,8 @@ class DarkNetClassifier:
                     if found_counter >= DARKNET['min_detection_to_save_file']:
                         LOGGER.info('DARKNET: FOUND SOMETHING working on {}'.format(vid_path))
                         VH.close_video()
+                        utils.copy_all_video_refrences(os.path.basename(vid_path).split('_mov')[0],
+                                                       self.dirs, wait_ffmpeg=True)
                         if self.debug:
                             print("MEAN:" + str(np.mean(np.array(debug_det), axis=0)))
                             print("STD:" + str(np.std(np.array(debug_det), axis=0)))
@@ -244,16 +248,16 @@ class DarkNetClassifier:
 
 class FalseAlarmClassifier:
     def __init__(self):
-        self.detectionData = deque(maxlen=DETECT_DATA_LEN_MAX)
+        self.detectionData = deque(maxlen=FALSE_ALARM['detect_data_len_max'])
         self.fa_cnt = 0
 
     def run(self, bb_final_list, img_shape):
-        if self.fa_cnt >= MIN_FA_COUNTER:
+        if self.fa_cnt >= FALSE_ALARM['min_fa_counter']:
             LOGGER.info('fa counter is --> {}'.format(str(self.fa_cnt)))
         #print(self.fa_cnt)
         if len(bb_final_list) == 0:
             self.detectionData.append((time.time(), 0, 0, 0, 0, 0, 0, [], -999))
-            self.fa_cnt = max((0, int(self.fa_cnt*FA_COUNTE_DECAY)))
+            self.fa_cnt = max((0, int(self.fa_cnt*FALSE_ALARM['fa_counte_decay'])))
             return 0
         height, width, layers = img_shape
         maxImageArea = height * width
@@ -284,22 +288,22 @@ class FalseAlarmClassifier:
         # print(len(self.detectionData))
 
         #if len(rel_bb) == 0:
-        #    self.fa_cnt = max((0, int(self.fa_cnt * FA_COUNTE_DECAY)))
+        #    self.fa_cnt = max((0, int(self.fa_cnt * FALSE_ALARM['fa_counte_decay'])))
         #    return 0
 
-        if len(self.detectionData) > DETECT_DATA_LEN_MIN:
+        if len(self.detectionData) > FALSE_ALARM['detect_data_len_min']:
             negCount = 0
-            rel_bb_cnt = np.zeros(len(BOX_WIDTH_HEIGHT))
+            rel_bb_cnt = np.zeros(len(DIFF['box_wh']))
             FA_string = 'FA --> '
             for cnt, data in enumerate(self.detectionData):
                 if data[1] is not 0:
                     tests = [
-                        data[1] > SUMALLAREAS_MAX,
-                        data[2] > 0 and data[2] < SUMNEAR_MIN,
-                        data[3] > SUMFAR_MAX,
-                        data[4] > MAXSINGLEAREA_MAX,
-                        data[5] > MAXALLAREA_MAX,
-                        data[6] > LEN_BB_MAX
+                        data[1] > FALSE_ALARM['sum_all_areas_max'],
+                        data[2] > 0 and data[2] < FALSE_ALARM['sum_near_min'],
+                        data[3] > FALSE_ALARM['sum_far_max'],
+                        data[4] > FALSE_ALARM['max_single_area_max'],
+                        data[5] > FALSE_ALARM['max_all_area_max'],
+                        data[6] > FALSE_ALARM['len_bb_max']
                     ]
                     if np.any(tests):
                         idxs = np.where(tests)[0]
@@ -317,7 +321,7 @@ class FalseAlarmClassifier:
                                 rel_bb_cnt[relData[0]] = rel_bb_cnt[relData[0]] + 1
                                 used.append(relData[0])
 
-                if negCount > NEG_MAX:
+                if negCount > FALSE_ALARM['neg_max']:
                     #cv2.putText(self.img_curr_2show, "False Alarm", (int(width * 0.05), int(height * 0.05)),
                     #            cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
                     LOGGER.info(FA_string.rstrip(','))
@@ -331,23 +335,24 @@ class FalseAlarmClassifier:
             if negCount > 0:
                 LOGGER.info(FA_string)
 
-            if rel_bb_cnt[rel_bb_cnt > POS_MAX].any() and self.fa_cnt < MIN_FA_COUNTER:
+            if rel_bb_cnt[rel_bb_cnt > FALSE_ALARM['pos_max']].any() and self.fa_cnt < FALSE_ALARM['min_fa_counter']:
                 #cv2.putText(self.img_curr_2show, "Positive Detection", (int(width * 0.05), int(height * 0.05)),
                 #            cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
                 LOGGER.info("Positive Detection")
-                self.fa_cnt = max((0, int(self.fa_cnt*FA_COUNTE_DECAY)))
+                self.fa_cnt = max((0, int(self.fa_cnt*FALSE_ALARM['fa_counte_decay'])))
                 return 1
 
                 # LOGGER.info("UNKNOWN")
-        self.fa_cnt = max((0, int(self.fa_cnt*FA_COUNTE_DECAY)))
+        self.fa_cnt = max((0, int(self.fa_cnt*FALSE_ALARM['fa_counte_decay'])))
         return 0
         # print(self.detectionData[-1] )
 
 
 if __name__=='__main__':
-    DNC = DarkNetClassifier(debug=True).start()
-    #DNC.Q.put('../recordings/detection/before_NN/20200920_183047_mov.mkv')
-    DNC.Q.put('../sim/person/20200916_080831_mov.mkv')
+    DNC = DarkNetClassifier(debug=False).start()
+    DNC.Q.put('../recordings/final_detection/20200930_181913/20200930_181913_mov.mkv')
+    #DNC.Q.put('../recordings/detection/before_NN/20200930_103412_mov.mkv')
+    #DNC.Q.put('../sim/person/20200916_080831_mov.mkv')
 
     while True:
         time.sleep(10000)

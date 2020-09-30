@@ -1,6 +1,8 @@
 from threading import Thread
 from queue import Queue
 import time
+import cv2
+
 from cfg import *
 from utils.CaptureHandler import CaptureHandler
 from image_processing.DiffHandler import DiffHandler
@@ -52,15 +54,15 @@ class ImageHandler:
 
 
     def update_image(self, frame):
-        ## resize frame with RESIZE_ORG (no interp) --> blur(2,2)
+        ## resize frame with DIFF['resize_org'] (no interp) --> blur(2,2)
         self.img_orig = frame
-        self.img_curr = cv2.blur(frame[0::RESIZE_ORG, 0::RESIZE_ORG, 0:], (2, 2))
+        self.img_curr = cv2.blur(frame[0::DIFF['resize_org'], 0::DIFF['resize_org'], 0:], (2, 2))
 
     def update_image_debug(self):
         self.img_curr_debug = self.img_curr.copy()
         height, width, layers = self.img_curr_debug.shape
         self.histograms = []
-        for iii, box in enumerate(BOX_WIDTH_HEIGHT):
+        for iii, box in enumerate(DIFF['box_wh']):
             w1 = int(width * box[0])
             h1 = int(height * box[2])
             w2 = int(width * box[1])
@@ -157,7 +159,7 @@ class ImageHandler:
     def queues_handling(self):
         if self.debug and self.debug_queue.qsize() < self.debug_queue.maxsize:
             self.debug_queue.put(self.img_curr_debug)
-            if self.debug_queue.qsize() > QUEUE_WARNING_LENGTH:
+            if self.debug_queue.qsize() > GENERAL['queue_warning_length']:
                 LOGGER.warn('DEBUGIMAGE: Frame Queue size is {}'.format(str(self.debug_queue.qsize())))
 
     def update(self):

@@ -1,6 +1,6 @@
 from cfg import *
 from utils import utils
-
+import cv2
 
 #import pyprofilers as pp
 #@pp.profile_by_line(exit=1)
@@ -21,15 +21,15 @@ class DiffHandler:
         bb_list = []
         for i, contour in enumerate(contours):
             area = cv2.contourArea(contour)
-            if area > min(minBBArea):
+            if area > min(DIFF['min_bb_area']):
                 cnt = cnt + 1
                 # cv2.drawContours(self.img_curr_2show, contour, -1, (0, 0, 255), 3)
                 x, y, w, h = cv2.boundingRect(contour)
                 COM = (x + int(w / 2), y + int(h / 2))
-                pctMinBBArea = ((COM[1] / height)) * (max(minBBArea) - min(minBBArea)) + min(minBBArea)
-                # print(pctMinBBArea,area,COM)
+                pct_min_bb_area = ((COM[1] / height)) * (max(DIFF['min_bb_area']) - min(DIFF['min_bb_area'])) + min(DIFF['min_bb_area'])
+                # print(pctDIFF['min_bb_area'],area,COM)
                 boxNum = utils.is_in_bb(COM, img_curr.shape)
-                if (boxNum > 0 and area > minBBArea[boxNum]) or (area > pctMinBBArea):
+                if (boxNum > 0 and area > DIFF['min_bb_area'][boxNum]) or (area > pct_min_bb_area):
                     bb_list.append((x, y, w, h))
                 # if (cnt > 0 ):
                 #    cv2.rectangle(self.img_curr_2show, (x,y), (x+w,y+h), (0, 0, 255), 4)
