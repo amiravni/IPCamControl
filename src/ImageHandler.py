@@ -4,7 +4,7 @@ import time
 import cv2
 
 from cfg import *
-from utils.CaptureHandler import CaptureHandler
+from utils.CaptureHandler import CaptureHandlerAsProcess
 from image_processing.DiffHandler import DiffHandler
 from image_processing.ClassifiersHandler import FalseAlarmClassifier
 from utils.VideoHandler import VideosListHandler
@@ -102,9 +102,9 @@ class ImageHandler:
     def init_stream(self):
         LOGGER.info('Init Stream')
         if STREAM_TYPE == 'rtsp':
-            CH = CaptureHandler(IPCAM_CONFIG['rtspurl']).start()
+            CH = CaptureHandlerAsProcess(IPCAM_CONFIG['rtspurl']).start()
         elif STREAM_TYPE == 'sim':
-            CH = CaptureHandler(IPCAM_CONFIG['sim_path'],
+            CH = CaptureHandlerAsProcess(IPCAM_CONFIG['sim_path'],
                                 stream_type=STREAM_TYPE, sim_start_frame=SIM_START_FRAME).start()
         time.sleep(0.5)
         return CH
@@ -163,41 +163,25 @@ class ImageHandler:
                 LOGGER.warn('DEBUGIMAGE: Frame Queue size is {}'.format(str(self.debug_queue.qsize())))
 
     def update(self):
-        CH = self.init_stream()
+        CHAP = self.init_stream()
         DH = DiffHandler()
         FAC = FalseAlarmClassifier()
 
         frame_error_counter = 0
         # keep looping infinitely
         while True:
-            if CH.is_alive():
-                try:
-                    frame = CH.read(timeout=2)
-                    frame_error_counter = 0
+            if CHAP.ext_watchdog():
+                frame = CHAP.read()
+                if frame is not None:
                     self.fps_counter += 1
                     self.frames_counter += 1
-                except:
-                    LOGGER.warn('IMAGEHANDLER: didnt get frame for 2 seconds')
-                    frame_error_counter += 1
-                    if frame_error_counter > 4:
-                        LOGGER.error('IMAGEHANDLER: Stream Issue: Init Stream')
-                        CH = self.init_stream()
-                    continue
-                if CH.Q.qsize() > CH.Q.maxsize/2:
-                    LOGGER.error('IMAGEHANDLER: Queue Capture Issue: Init Stream')
-                    CH = self.init_stream()
-                    continue
-                self.update_image(frame)
-                self.bb_list = DH.run(self.img_curr)
-                self.fac_res = FAC.run(self.bb_list, self.img_curr.shape)
-                #if self.fac_res == 1:
-                #    self.found_movemonet = True
-                #if self.found_movemonet:
-                    #self.add_mov_info()
-                if self.debug:
-                    self.update_image_debug()
-                self.handle_videos()
-                self.add_frame_to_video()
+                    self.update_image(frame)
+                    self.bb_list = DH.run(self.img_curr)
+                    self.fac_res = FAC.run(self.bb_list, self.img_curr.shape)
+                    if self.debug:
+                        self.update_image_debug()
+                    self.handle_videos()
+                    self.add_frame_to_video()
 
             else:
                 if STREAM_TYPE == 'sim':
@@ -205,8 +189,7 @@ class ImageHandler:
                     self.handle_videos(sim_end=True)
                     return
                 else:
-                    LOGGER.error('Thread is dead baby.. Restarting')
-                    CH = self.init_stream()
+                    LOGGER.error('IMAGEHANDLER: Waiting for CHAP process to restart')
 
             self.queues_handling()
 

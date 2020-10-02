@@ -1,1 +1,4 @@
-VERSION = '0.8.0.0'
+VERSION = '0.8.1.0'
+Changes = '''
+0.8.1.0: Capture Handler as a self working process with watchdog
+'''
