@@ -19,6 +19,10 @@ def scale_bbox(bbox, bbox_im_w, bbox_im_h, org_w, org_h):
         int(np.round(bbox[1] / y_scale)), \
         int(np.round(bbox[2] / x_scale)), \
         int(np.round(bbox[3] / y_scale))
+    org_left = max(0, org_left)
+    org_top = max(0, org_top)
+    org_right = min(org_w, org_right)
+    org_bottom = min(org_h, org_bottom)
     return [org_left, org_top, org_right, org_bottom]
 
 def association(last_list, curr_list, frame_number, input_type='yolo'):
@@ -29,8 +33,10 @@ def association(last_list, curr_list, frame_number, input_type='yolo'):
         curr_list = [list(item[2]) for item in curr_list]
         [item.append(frame_number) for item in curr_list]
         # Xc,Yc,W,H,num
-    if last_list is None:
+    if last_list is None or len(last_list) == 0:
         return curr_list, list(range(len(curr_list)))
+    if len(curr_list) == 0:
+        return last_list, []
     score_matrix = np.zeros((len(last_list), len(curr_list)))
     if len(last_list) > len(curr_list):
         flip_matrix = True

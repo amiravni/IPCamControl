@@ -214,7 +214,10 @@ class DarkNetClassifier:
                                         cv2.circle(self.org_frame, COM, 1, (255,255,255), 1)
 
                                     for iii, img_data in enumerate(self.small_imgs):
-                                        cv2.imshow(str(iii), img_data['img'])
+                                        try:
+                                            cv2.imshow(str(iii), img_data['img'])
+                                        except:
+                                            print('error')
                                     if cv2.waitKey(1) == 27:
                                         break
                                 if self.debug and len(rel_detections)>0:
@@ -365,7 +368,8 @@ class FalseAlarmClassifier:
 
 if __name__=='__main__':
     DNC = DarkNetClassifier(debug=True).start()
-    DNC.Q.put('../recordings/final_detection/20201001_092305/20201001_092305_mov.mkv')
+    DNC.Q.put('../recordings/detection/before_NN/20201003_002705_mov.mkv')
+    #DNC.Q.put('../recordings/final_detection/20201001_092305/20201001_092305_mov.mkv')
     #DNC.Q.put('../recordings/final_detection/20200930_181913/20200930_181913_mov.mkv')
     #DNC.Q.put('../recordings/detection/before_NN/20200930_103412_mov.mkv')
     #DNC.Q.put('../sim/person/20200916_080831_mov.mkv')
