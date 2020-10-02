@@ -5,9 +5,76 @@ from glob import glob
 import json
 import shutil
 import time
+from munkres import Munkres, print_matrix
 
 def time2string(input_time):
     return datetime.datetime.fromtimestamp(input_time).strftime('%Y%m%d_%H%M%S')
+
+def scale_bbox(bbox, bbox_im_w, bbox_im_h, org_w, org_h):
+    # bbox - left, top, right, bottom
+    x_scale = bbox_im_w / org_w
+    y_scale = bbox_im_h / org_h
+    org_left, org_top, org_right, org_bottom = \
+        int(np.round(bbox[0] / x_scale)), \
+        int(np.round(bbox[1] / y_scale)), \
+        int(np.round(bbox[2] / x_scale)), \
+        int(np.round(bbox[3] / y_scale))
+    return [org_left, org_top, org_right, org_bottom]
+
+def association(last_list, curr_list, frame_number, input_type='yolo'):
+    # TODO: better score (with W,H),
+    # TODO: above thresh --> append new
+    #print(frame_number)
+    if input_type == 'yolo':
+        curr_list = [list(item[2]) for item in curr_list]
+        [item.append(frame_number) for item in curr_list]
+        # Xc,Yc,W,H,num
+    if last_list is None:
+        return curr_list, list(range(len(curr_list)))
+    score_matrix = np.zeros((len(last_list), len(curr_list)))
+    if len(last_list) > len(curr_list):
+        flip_matrix = True
+    else:
+        flip_matrix = False
+    for iii, list1 in enumerate(last_list):
+        for jjj, list2 in enumerate(curr_list):
+            if frame_number - list1[-1] > VID_FPS*2.5:
+                score_matrix[iii, jjj] = 1e5
+            else:
+                score_matrix[iii, jjj] = np.linalg.norm(np.array(list1[:2]) - np.array(list2[:2]))
+
+    if flip_matrix:
+        score_matrix = score_matrix.T
+    #print_matrix(score_matrix, msg='Highest profit through this matrix:')
+    indexes = Munkres().compute(score_matrix)
+    arranged_list = last_list.copy()
+    remove_idxs_curr = []
+    sorted_idxs = [None]*len(curr_list)
+    for idxs in indexes:
+        if flip_matrix:
+            idxs = idxs[::-1]
+        arranged_list[idxs[0]] = curr_list[idxs[1]]
+        sorted_idxs[idxs[1]] = idxs[0]
+        arranged_list[idxs[0]][-1] = frame_number
+        remove_idxs_curr.append(idxs[1])
+    if len(curr_list) > len(last_list):
+        for index in sorted(remove_idxs_curr, reverse=True):
+            del curr_list[index]
+        for item in curr_list:
+            arranged_list.append(item)
+
+    return arranged_list, sorted_idxs
+    # score_matrix_tmp = score_matrix.copy()
+    # print_matrix(score_matrix, msg='Highest profit through this matrix:')
+    # total = 0
+    # for row, column in indexes:
+    #     value = score_matrix[row][column]
+    #     total += value
+    #     print(f'({row}, {column}) -> {value}')
+    #
+    # print(f'total profit={total}')
+
+
 
 def is_intersect(veci, vecj, margin):
     xi0 = veci[0]

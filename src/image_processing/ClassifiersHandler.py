@@ -59,16 +59,30 @@ class DarkNetClassifier:
         else:
             return False
 
-    def draw_boxes(self, detections):
+    def draw_boxes(self, detections, sorted_idxs):
+        cnt = 0
+        tmp_img = self.org_frame.copy()
         for label, confidence, bbox in detections:
             left, top, right, bottom = darknet.bbox2points(bbox)
-            x_scale = self.width / self.org_frame.shape[1]
-            y_scale = self.height / self.org_frame.shape[0]
-            org_left, org_top, org_right, org_bottom = \
-                int(np.round(left / x_scale)), \
-                int(np.round(top / y_scale)), \
-                int(np.round(right / x_scale)), \
-                int(np.round(bottom / y_scale))
+            org_left, org_top, org_right, org_bottom = utils.scale_bbox([left, top, right, bottom],
+                                                                        self.width, self.height,
+                                                                        self.org_frame.shape[1],
+                                                                        self.org_frame.shape[0])
+
+            small_image_data = {
+                'img': tmp_img[org_top:org_bottom, org_left:org_right],
+                'lable': label,
+                'confidence': confidence,
+                'width': org_right - org_left,
+                'height': org_bottom - org_top
+            }
+            if sorted_idxs[cnt] is None or sorted_idxs[cnt] >= len(self.small_imgs):
+                self.small_imgs.append(small_image_data)
+            else:
+                self.small_imgs[sorted_idxs[cnt]] = small_image_data
+
+            cnt += 1
+
             cv2.rectangle(self.org_frame,
                           (org_left, org_top),
                           (org_right, org_bottom),
@@ -76,21 +90,7 @@ class DarkNetClassifier:
             cv2.putText(self.org_frame, "{} [{:.2f}]".format(label, float(confidence)),
                         (org_left, org_top - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5,
                         self.class_colors[label], 2)
-            self.small_imgs.append({
-                'img': self.org_frame[org_top:org_bottom, org_left:org_right],
-                'lable': label,
-                'confidence': confidence,
-                'width': org_right - org_left,
-                'height': org_bottom - org_top
-            })
-            #cv2.rectangle(self.resize_frame, (left, top), (right, bottom), self.class_colors[label], 1)
-            #cv2.putText(self.resize_frame, "{}".format(label),
-            #            (left, top - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5,
-            #            self.class_colors[label], 2)
-            # cv2.putText(self.resize_frame, "{} [{:.2f}]".format(label, float(confidence)),
-            #                  (left, top - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5,
-            #                  self.class_colors[label], 2)
-        #return self.org_frame
+
 
     def video_capture(self, cap):
         while cap.isOpened():
@@ -123,6 +123,18 @@ class DarkNetClassifier:
                     break
             if not skip_detection:
                 rel_detections.append(detection)
+        ### merge similar detections
+        remove_idxs = []
+        for iii, detection1 in enumerate(rel_detections):
+            for jjj, detection2 in enumerate(rel_detections):
+                if iii <= jjj:
+                    continue
+                score = np.abs(np.array(detection1[2]) - np.array(detection2[2]))
+                #print(iii,jjj,score,np.mean(score))
+                if np.mean(score) < DARKNET['merge_thresh']:
+                    remove_idxs.append(iii)
+        for index in sorted(remove_idxs, reverse=True):
+            del rel_detections[index]
 
         return rel_detections
 
@@ -140,6 +152,7 @@ class DarkNetClassifier:
                     if np.linalg.norm(COM_1 - COM_2) > diag * DARKNET['min_pct_from_first_res']:
                         return True
         return False
+
 
     def inference(self):
         detections = darknet.detect_image(self.network, self.class_names, self.darknet_image, thresh=self.thresh)
@@ -167,26 +180,28 @@ class DarkNetClassifier:
                     found_counter = 0
                     debug_det = []
                     self.first_result = None
+                    frame_counter = 0
+                    last_detection_arranged = None
                     while True:
                         if self.video_capture(cap):
                             # if self.debug:
-                            #      self.org_frame = self.resize_frame
-                            #      vid_width = self.width
-                            #      vid_height = self.height
-                            #      self.org_frame = cv2.cvtColor(self.org_frame, cv2.COLOR_BGR2RGB)
+                            #       self.org_frame = self.resize_frame
+                            #       vid_width = self.width
+                            #       vid_height = self.height
+                            #       self.org_frame = cv2.cvtColor(self.org_frame, cv2.COLOR_BGR2RGB)
+                            frame_counter += 1
                             detections = self.inference()
                             rel_detections = self.get_relevant_detections(detections)
+                            last_detection_arranged, sorted_idxs = utils.association(last_detection_arranged,
+                                                                                     rel_detections.copy(),
+                                                                                     frame_counter)
                             if self.resize_frame is not None and \
                                     (found_counter >= DARKNET['min_detection_to_save_file'] or
                                      self.check_for_continuity(rel_detections)):
                                 found_counter += 1
-                                self.draw_boxes(rel_detections)
+                                self.draw_boxes(rel_detections, sorted_idxs)
                                 VH.add_frame(self.org_frame)
-                                #if args.out_filename is not None:
-                                #    video.write(image)
-                                #cv2.imshow('Inference', self.org_frame)
-                                #if cv2.waitKey(1) == 27:
-                                #    break
+
                                 if self.debug:
                                     for iii, box in enumerate(self.search_box):
                                         w1 = int(vid_width * box[0])
@@ -197,9 +212,9 @@ class DarkNetClassifier:
                                     for det in rel_detections:
                                         COM = (int(det[2][0]), int(det[2][1]))
                                         cv2.circle(self.org_frame, COM, 1, (255,255,255), 1)
-                                    cv2.imshow('Inference', self.org_frame)
-                                    #cv2.imshow('Inference', self.small_imgs[-1]['img'])
-                                    #print([self.small_imgs[-1]['width'], self.small_imgs[-1]['height']])
+
+                                    for iii, img_data in enumerate(self.small_imgs):
+                                        cv2.imshow(str(iii), img_data['img'])
                                     if cv2.waitKey(1) == 27:
                                         break
                                 if self.debug and len(rel_detections)>0:
@@ -349,8 +364,9 @@ class FalseAlarmClassifier:
 
 
 if __name__=='__main__':
-    DNC = DarkNetClassifier(debug=False).start()
-    DNC.Q.put('../recordings/final_detection/20200930_181913/20200930_181913_mov.mkv')
+    DNC = DarkNetClassifier(debug=True).start()
+    DNC.Q.put('../recordings/final_detection/20201001_092305/20201001_092305_mov.mkv')
+    #DNC.Q.put('../recordings/final_detection/20200930_181913/20200930_181913_mov.mkv')
     #DNC.Q.put('../recordings/detection/before_NN/20200930_103412_mov.mkv')
     #DNC.Q.put('../sim/person/20200916_080831_mov.mkv')
 
