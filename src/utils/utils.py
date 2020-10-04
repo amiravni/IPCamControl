@@ -70,16 +70,12 @@ def association(last_list, curr_list, frame_number, input_type='yolo'):
             arranged_list.append(item)
 
     return arranged_list, sorted_idxs
-    # score_matrix_tmp = score_matrix.copy()
-    # print_matrix(score_matrix, msg='Highest profit through this matrix:')
-    # total = 0
-    # for row, column in indexes:
-    #     value = score_matrix[row][column]
-    #     total += value
-    #     print(f'({row}, {column}) -> {value}')
-    #
-    # print(f'total profit={total}')
 
+def is_night_vision(frame):
+    test1 = np.mean(np.abs(frame[:, :, 2].astype('int32') - frame[:, :, 0].astype('int32')))
+    test2 = np.mean(np.abs(frame[:, :, 1].astype('int32') - frame[:, :, 0].astype('int32')))
+    test3 = np.mean(np.abs(frame[:, :, 1].astype('int32') - frame[:, :, 2].astype('int32')))
+    return all(np.array([test1, test2, test3]) < IMAGE['is_night_vision_score_thresh'])
 
 
 def is_intersect(veci, vecj, margin):
@@ -154,7 +150,8 @@ def make_dir_if_not_exist(_dir):
         os.makedirs(_dir)
 
 def copy_all_video_refrences(video_name, dir_tree, target='final_detection', wait_ffmpeg=False):
-    target_path = join_strings_as_path([dir_tree.get_path_string(['final_detection']), video_name])
+    video_name_as_dir = join_strings_as_path(video_name.split('_'))
+    target_path = join_strings_as_path([dir_tree.get_path_string(['final_detection']), video_name_as_dir])
     make_dir_if_not_exist(target_path)
     vid_locations = dir_tree.find_files(video_name)
     while wait_ffmpeg and \

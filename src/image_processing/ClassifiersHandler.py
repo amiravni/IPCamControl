@@ -39,6 +39,7 @@ class DarkNetClassifier:
         self.thresh = thresh
         self.Q = Queue(maxsize=queueSize)
 
+        self.is_night_vision = None
         self.org_frame = None
         self.resize_frame = None
         self.dirs = utils.DirsHandler(DIRS)
@@ -97,6 +98,13 @@ class DarkNetClassifier:
             ret, frame = cap.read()
             if not ret:
                 break
+            if self.is_night_vision is None:
+                if utils.is_night_vision(frame):
+                    self.is_night_vision = True
+                else:
+                    self.is_night_vision = False
+            if self.is_night_vision:
+                frame = cv2.blur(frame, DARKNET['night_vision_blur_kernel']) # img grainy - seems to make better results
             frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             frame_resized = cv2.resize(frame_rgb, (self.width, self.height),
                                        interpolation=cv2.INTER_LINEAR)
@@ -180,6 +188,7 @@ class DarkNetClassifier:
                     found_counter = 0
                     debug_det = []
                     self.first_result = None
+                    self.is_night_vision = None
                     frame_counter = 0
                     last_detection_arranged = None
                     while True:
@@ -197,8 +206,10 @@ class DarkNetClassifier:
                                                                                      frame_counter)
                             if self.resize_frame is not None and \
                                     (found_counter >= DARKNET['min_detection_to_save_file'] or
-                                     self.check_for_continuity(rel_detections)):
-                                found_counter += 1
+                                     len(rel_detections) > 0):
+
+                                if self.check_for_continuity(rel_detections):
+                                    found_counter += 1
                                 self.draw_boxes(rel_detections, sorted_idxs)
                                 VH.add_frame(self.org_frame)
 
@@ -209,9 +220,9 @@ class DarkNetClassifier:
                                         w2 = int(vid_width * box[1])
                                         h2 = int(vid_height * box[3])
                                         cv2.rectangle(self.org_frame, (w1, h1), (w2, h2), (0, 0, 255), 2)
-                                    for det in rel_detections:
-                                        COM = (int(det[2][0]), int(det[2][1]))
-                                        cv2.circle(self.org_frame, COM, 1, (255,255,255), 1)
+                                    # for det in rel_detections:
+                                    #     COM = (int(det[2][0]), int(det[2][1]))
+                                    #     cv2.circle(self.org_frame, COM, 1, (255,255,255), 1)
 
                                     for iii, img_data in enumerate(self.small_imgs):
                                         try:
@@ -220,9 +231,9 @@ class DarkNetClassifier:
                                             print('error')
                                     if cv2.waitKey(1) == 27:
                                         break
-                                if self.debug and len(rel_detections)>0:
-                                    debug_det.append(rel_detections[0][2])
-                                    print(rel_detections)
+                                    if len(rel_detections) > 0:
+                                        debug_det.append(rel_detections[0][2])
+                                        print(rel_detections)
 
                         else:
                             break
@@ -368,8 +379,9 @@ class FalseAlarmClassifier:
 
 if __name__=='__main__':
     DNC = DarkNetClassifier(debug=True).start()
+    #DNC.Q.put('../sim/NN_FP/20201003_053500_mov.mkv')
     DNC.Q.put('../recordings/detection/before_NN/20201003_002705_mov.mkv')
-    #DNC.Q.put('../recordings/final_detection/20201001_092305/20201001_092305_mov.mkv')
+    #DNC.Q.put('../recordings/final_detection/20201001_092305_3detections/20201001_092305_mov.mkv')
     #DNC.Q.put('../recordings/final_detection/20200930_181913/20200930_181913_mov.mkv')
     #DNC.Q.put('../recordings/detection/before_NN/20200930_103412_mov.mkv')
     #DNC.Q.put('../sim/person/20200916_080831_mov.mkv')

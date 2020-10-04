@@ -18,7 +18,8 @@ class FilesHandlerRT():
         self.make_mov_vid = make_mov_vid
         self.debug = debug
         self.thread_cancelled = False
-        self.ffmpeg_command = FFMPEG_PARAMS['command'].copy()
+        command_param = 'command_' + FFMPEG_PARAMS['use']
+        self.ffmpeg_command = FFMPEG_PARAMS[command_param].copy()
         self.dirs = utils.DirsHandler(DIRS)
         LOGGER.info("FileHandler initialized at {} with substring {}".format(self.basepath, self.substring))
 
@@ -90,11 +91,13 @@ class FilesHandlerRT():
                 encoding = True
                 time.sleep(1) # finish moving file
                 output = '{}.mp4'.format(''.join(fname.split('.mkv')[:-1]))
-                command[2] = utils.join_strings_as_path([basepath, fname])
-                command[13] = utils.join_strings_as_path([basepath, REC_DIR_COMPRESSED, output])
+                input_full_path = utils.join_strings_as_path([basepath, fname])
+                output_full_path = utils.join_strings_as_path([basepath, REC_DIR_COMPRESSED, output])
+                command[FFMPEG_PARAMS['input_index']] = input_full_path
+                command[FFMPEG_PARAMS['output_index']] = output_full_path
                 LOGGER.info("START ENCODING: {} --> {}".format(fname, output))
                 try:
-                    if os.stat(command[2]).st_size > 50000: #at least 50000 Bytes
+                    if os.stat(input_full_path).st_size > 50000: #at least 50000 Bytes
                         subprocess.call(command)
                         #if self.make_mov_vid:
                         #    self.make_mov_vid_func(basepath, fname)
@@ -102,10 +105,10 @@ class FilesHandlerRT():
                         LOGGER.info("FILE {} is almost empty".format(fname))
                     LOGGER.info("DONE ENCODING: {} --> {}".format(basepath, output))
                     if self.delete_org:
-                        os.remove(command[2])
+                        os.remove(input_full_path)
                     else:
                         mov_path = utils.join_strings_as_path([basepath, REC_DIR_COMPRESSED_FOR_NN, fname])
-                        shutil.move(command[2], mov_path)
+                        shutil.move(input_full_path, mov_path)
                         if self.substring == '_mov':
                             DNC.Q.put(mov_path)
 
