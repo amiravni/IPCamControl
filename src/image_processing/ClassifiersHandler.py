@@ -77,6 +77,7 @@ class DarkNetClassifier:
                 'width': org_right - org_left,
                 'height': org_bottom - org_top
             }
+
             if sorted_idxs[cnt] is None or sorted_idxs[cnt] >= len(self.small_imgs):
                 self.small_imgs.append(small_image_data)
             else:
@@ -205,7 +206,7 @@ class DarkNetClassifier:
                                                                                      rel_detections.copy(),
                                                                                      frame_counter)
                             if self.resize_frame is not None and \
-                                    (found_counter >= DARKNET['min_detection_to_save_file'] or
+                                    (found_counter > 0 or
                                      len(rel_detections) > 0):
 
                                 if self.check_for_continuity(rel_detections):
@@ -380,8 +381,8 @@ class FalseAlarmClassifier:
 if __name__=='__main__':
     DNC = DarkNetClassifier(debug=True).start()
     #DNC.Q.put('../sim/NN_FP/20201003_053500_mov.mkv')
-    DNC.Q.put('../recordings/detection/before_NN/20201003_002705_mov.mkv')
-    #DNC.Q.put('../recordings/final_detection/20201001_092305_3detections/20201001_092305_mov.mkv')
+    #DNC.Q.put('../recordings/detection/before_NN/20201003_002705_mov.mkv')
+    DNC.Q.put('../recordings/final_detection/run_1week_oct2020/20201001_092305/20201001_092305_mov.mkv')
     #DNC.Q.put('../recordings/final_detection/20200930_181913/20200930_181913_mov.mkv')
     #DNC.Q.put('../recordings/detection/before_NN/20200930_103412_mov.mkv')
     #DNC.Q.put('../sim/person/20200916_080831_mov.mkv')

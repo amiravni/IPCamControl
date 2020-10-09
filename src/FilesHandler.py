@@ -7,8 +7,117 @@ import subprocess
 from utils import utils
 from image_processing.ClassifiersHandler import DarkNetClassifier
 import traceback
+from multiprocessing import Process, Queue, current_process
+
 
 class FilesHandlerRT():
+    def __init__(self, basepath, run_compression=[], run_NN=[], delete_org=[], debug=False):
+        self.basepath = basepath
+        self.delete_org = delete_org
+        self.run_compression = run_compression
+        self.run_NN = run_NN
+        self.debug = debug
+        self.thread_cancelled = False
+        command_param = 'command_' + FFMPEG_PARAMS['use']
+        self.ffmpeg_command = FFMPEG_PARAMS[command_param].copy()
+        self.dirs = utils.DirsHandler(DIRS)
+        LOGGER.info("FileHandler initialized at {} \n"
+                    "Will compress -> {} \n"
+                    "Will run object detection -> {}\n"
+                    "Will delete original files -> {}".format(self.basepath,
+                                                              str(self.run_compression),
+                                                              str(self.run_NN),
+                                                              str(self.delete_org)))
+
+    def start(self):
+        self.thread = Thread(target=self.update)
+        self.thread.daemon = False
+        self.thread.start()
+        return self
+
+    def is_alive(self):
+        return self.thread.isAlive()
+
+    def shut_down(self):
+        self.thread_cancelled = True
+        # block while waiting for thread to terminate
+        while self.thread.isAlive():
+            time.sleep(1)
+        return True
+
+    def file_process(self, basepath, fname, command, dnc_proc_q, compress_file, run_nn, delete_file):
+        input_full_path = utils.join_strings_as_path([basepath, fname])
+        tmp_full_path = utils.join_strings_as_path([basepath, 'tmp', fname])
+        shutil.move(input_full_path, tmp_full_path)
+
+        if compress_file:
+            output = '{}.mp4'.format(''.join(fname.split('.mkv')[:-1]))
+            output_full_path = utils.join_strings_as_path([basepath, REC_DIR_COMPRESSED, output])
+            command[FFMPEG_PARAMS['input_index']] = tmp_full_path
+            command[FFMPEG_PARAMS['output_index']] = output_full_path
+            LOGGER.info("START ENCODING: {} --> {}".format(fname, output))
+            subprocess.call(command)
+            LOGGER.info("DONE ENCODING: {} --> {}".format(fname, output))
+
+        if run_nn:
+            mov_path = utils.join_strings_as_path([self.basepath, REC_DIR_COMPRESSED_FOR_NN, fname])
+            shutil.move(tmp_full_path, mov_path)
+            dnc_proc_q.put(mov_path)
+        elif delete_file:
+            os.remove(tmp_full_path)
+
+        return
+
+    def update(self):
+        utils.make_dir_if_not_exist(utils.join_strings_as_path([self.basepath, 'tmp']))
+        dnc_proc_q = Queue(maxsize=128)
+        if len(self.run_NN) > 0:
+            DNC = DarkNetClassifier().start()
+        else:
+            DNC = []
+        while not self.thread_cancelled:
+            found_file = False
+            for fname in os.listdir(self.basepath):
+                input_full_path = utils.join_strings_as_path([self.basepath, fname])
+                if os.path.isdir(input_full_path):
+                    # skip directories
+                    continue
+                # try:
+                compress_file = False
+                run_nn = False
+                delete_file = False
+                time.sleep(1)  # finish moving file
+                if os.stat(input_full_path).st_size > 50000: #at least 50000 Bytes
+                    if utils.is_str_in_file(self.run_compression, fname):
+                        compress_file = True
+                    if utils.is_str_in_file(self.run_NN, fname):
+                        run_nn = True
+                else:
+                    LOGGER.info("FILE {} is almost empty".format(fname))
+
+                if utils.is_str_in_file(self.delete_org, fname):
+                    delete_file = True
+
+                if compress_file or run_nn or delete_file:
+                    process = Process(name='ffmpeg_{}'.format('123'),
+                                      target=self.file_process,
+                                      args=(self.basepath, fname,
+                                            self.ffmpeg_command, dnc_proc_q,
+                                            compress_file, run_nn, delete_file))
+                    process.daemon = False
+                    process.start()
+                    time.sleep(1)  # finish moving file
+                    found_file = True
+
+            while dnc_proc_q.qsize() > 0:
+                filename = dnc_proc_q.get()
+                LOGGER.info('NN: Put new file in queue -> {}'.format(filename))
+                DNC.Q.put(filename)
+
+            if not found_file:
+                time.sleep(10)
+
+class FilesHandlerRT_():
 
     def __init__(self, basepath, substring='.', make_mov_vid=False, delete_org=True, debug=False):
 
@@ -38,42 +147,6 @@ class FilesHandlerRT():
         while self.thread.isAlive():
             time.sleep(1)
         return True
-
-    # def make_mov_vid_func(self, basepath, vid_name):
-    #     if STREAM_TYPE == 'sim':
-    #         start_frame = SIM_START_FRAME
-    #     else:
-    #         start_frame = 0
-    #
-    #     full_path = utils.join_strings_as_path([basepath, vid_name]).split('_main.mkv')[0]+'_mov.mkv'
-    #
-    #     CH = CaptureHandler(utils.join_strings_as_path([basepath, vid_name]),
-    #                         stream_type='sim', sim_start_frame=SIM_START_FRAME, name='FH', fps=500)
-    #     VH = VideoHandler(full_path, CH.height, CH.width, debug=True, vid_fps=CH.sim_fps )
-    #     frames_file = utils.join_strings_as_path([basepath, vid_name.split('_main.mkv')[0]+'.txt'])
-    #     with open(frames_file, 'r') as f:
-    #         mov_frames = json.loads(f.read())
-    #     CH.start()
-    #     delay_time = time.time()
-    #     frame_counter = SIM_START_FRAME
-    #     while CH.is_alive() or time.time() - delay_time < 5.0: # 2sec to start stream
-    #         if CH.is_alive():
-    #             try:
-    #                 frame = CH.read(timeout=2)
-    #             except:
-    #                 continue
-    #             frame_counter += 1
-    #             if any([frame_counter > mov_frame[0] and frame_counter < mov_frame[1]
-    #                     for mov_frame in mov_frames]):
-    #                 VH.add_frame(frame)
-    #         else:
-    #             time.sleep(1.0)
-    #     VH.close_and_move(self.dirs.all_dirs['diff_detection_ready_for_NN'])
-    #     try:
-    #         shutil.move(frames_file,
-    #                 utils.join_strings_as_path([basepath, REC_DIR_COMPRESSED]))
-    #     except:
-    #         print('didnt work')
 
     def update(self):
 

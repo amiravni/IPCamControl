@@ -1,5 +1,8 @@
-VERSION = '0.8.2.0'
+VERSION = '0.8.3.0'
 Changes = {
+    '0.8.3.0': '''
+    FileHandler merged for directory + start processes for any file 
+    ''',
     '0.8.2.0': ''' Latest: Add association to NN detections
     add night vision detection
     change ffmpeg to h265 

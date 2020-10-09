@@ -12,11 +12,15 @@ if __name__ == '__main__':
         FH = []
         FHNRT = []
         DH = utils.DirsHandler(DIRS)
-        FH.append(FilesHandlerRT(DH.all_dirs['diff_detection'], substring='_mov', delete_org=False).start())
-        FH.append(FilesHandlerRT(DH.all_dirs['diff_detection'], substring='_main').start())
-        FH.append(FilesHandlerRT(DH.all_dirs['diff_detection'], substring='_debug').start())
-        FH.append(FilesHandlerRT(DH.all_dirs['no_diff_detection'], substring='_main').start())
-        FH.append(FilesHandlerRT(DH.all_dirs['no_diff_detection'], substring='_debug').start())
+        FH.append(FilesHandlerRT(DH.all_dirs['diff_detection'],
+                                 run_compression=['_main', '_debug', 'mov'],
+                                 run_NN=['_mov'],
+                                 delete_org=['_main', '_debug', 'mov']
+                                 ).start())
+        FH.append(FilesHandlerRT(DH.all_dirs['no_diff_detection'],
+                                 run_compression=['_main'],
+                                 delete_org=['_main', '_debug']
+                                 ).start())
         FHNRT.append(FilesHandlerNonRT(dir_key='diff_detection',
                                        max_history=FILES['max_history_detected']).start())
         FHNRT.append(FilesHandlerNonRT(dir_key='no_diff_detection',

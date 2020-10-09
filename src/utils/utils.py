@@ -164,6 +164,14 @@ def copy_all_video_refrences(video_name, dir_tree, target='final_detection', wai
             target_file_path = join_strings_as_path([target_path,os.path.basename(file)])
             shutil.move(file, target_file_path, copy_function=shutil.copy2)
 
+def is_str_in_file(input, file_name):
+    if isinstance(input, list):
+        return any([my_str in file_name for my_str in input])
+    elif isinstance(input, str):
+        return input in file_name
+    else:
+        LOGGER.error('Dont know what to do with {}'.format(str(input)))
+
 class DirsHandler:
     def __init__(self, dir_dict, main_dir='', curr_key=''):
         try:
