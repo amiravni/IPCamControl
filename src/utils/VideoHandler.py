@@ -6,11 +6,11 @@ class VideosListHandler:
     def __init__(self):
         self.video_dict = dict()
 
-    def add_video(self, name, full_path, height, width, debug=False, only_if_not_exist=False):
+    def add_video(self, name, full_path, height, width, debug=False, only_if_not_exist=False, vid_fps=VID_FPS):
         if only_if_not_exist and name in self.video_dict:
             return
         else:
-            self.video_dict[name] = VideoHandler(full_path, height, width, debug)
+            self.video_dict[name] = VideoHandler(full_path, height, width, debug, vid_fps)
 
     def add_frame(self, name, frame):
         if name in self.video_dict:

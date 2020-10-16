@@ -1,5 +1,8 @@
 VERSION = '0.8.3.0'
 Changes = {
+    '0.8.4.0': '''
+    add possibility to save small videos of detections
+    ''',
     '0.8.3.0': '''
     FileHandler merged for directory + start processes for any file 
     ''',
@@ -7,5 +10,15 @@ Changes = {
     add night vision detection
     change ffmpeg to h265 
     ''',
-    '0.8.1.0': 'Capture Handler as a self working process with watchdog'
+    '0.8.1.0': '''
+    Capture Handler as a self working process with watchdog
+    ''',
+    '0.8.0.0': '''
+    Add old videos deletion
+    Add important videos keeping
+    rearrange params
+    ''',
+    '0.7.0.0': '''
+    structured code with yolov4
+    '''
 }

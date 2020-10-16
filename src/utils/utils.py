@@ -6,6 +6,8 @@ import json
 import shutil
 import time
 from munkres import Munkres, print_matrix
+import traceback
+import cv2
 
 def time2string(input_time):
     return datetime.datetime.fromtimestamp(input_time).strftime('%Y%m%d_%H%M%S')
@@ -149,13 +151,46 @@ def make_dir_if_not_exist(_dir):
     if not os.path.exists(_dir):
         os.makedirs(_dir)
 
+def resize_keep_ratio(image, size):
+    try:
+        h, w = image.shape[:2]
+        h_new, w_new = size
+        c = None if len(image.shape) < 3 else image.shape[2]
+        #TODO: Deal with c = None
+        image_final = np.zeros((size[0], size[1], c), np.uint8)
+        aspect_ratio_h = h / h_new
+        aspect_ratio_w = w / w_new
+        if aspect_ratio_h == aspect_ratio_w:
+            return cv2.resize(image, (size[1], size[0]))
+        elif aspect_ratio_w < aspect_ratio_h:
+            image_new_width = w / aspect_ratio_h
+            image_new_height = size[0]
+        else:
+            image_new_height = h / aspect_ratio_w
+            image_new_width = size[1]
+        image_new = cv2.resize(image, (int(image_new_width), int(image_new_height)))
+
+        if image_new.shape[0] == image_final.shape[0]:
+            gap = int(np.floor((image_final.shape[1] - image_new.shape[1])/2))
+            image_final[:, gap:(gap + image_new.shape[1]), :] = image_new
+        else:
+            gap = int(np.floor((image_final.shape[0] - image_new.shape[0])/2))
+            image_final[gap:(gap + image_new.shape[0]), :, :] = image_new
+        return image_final
+    except:
+        LOGGER.error('resize issue')
+        LOGGER.error(str(traceback.format_exc()))
+        return image_final
+
+
 def copy_all_video_refrences(video_name, dir_tree, target='final_detection', wait_ffmpeg=False):
     video_name_as_dir = join_strings_as_path(video_name.split('_'))
     target_path = join_strings_as_path([dir_tree.get_path_string(['final_detection']), video_name_as_dir])
     make_dir_if_not_exist(target_path)
     vid_locations = dir_tree.find_files(video_name)
+    tmp_location = join_strings_as_path([dir_tree.sub_dirs['diff_detection'].curr_dir, 'tmp'])
     while wait_ffmpeg and \
-            any([os.path.dirname(idx) == dir_tree.sub_dirs['diff_detection'].curr_dir for idx in vid_locations]):
+            any([os.path.dirname(idx) == tmp_location for idx in vid_locations]):
         LOGGER.warning('Darknet finished but ffmpeg didnt, waiting a few seconds ({})'.format(video_name))
         time.sleep(10)
         vid_locations = dir_tree.find_files(video_name)
