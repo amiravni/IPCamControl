@@ -196,8 +196,9 @@ def copy_all_video_refrences(video_name, dir_tree, target='final_detection', wai
         vid_locations = dir_tree.find_files(video_name)
     for file in vid_locations:
         if os.path.isfile(file) and os.path.dirname(file) != target_path:
-            target_file_path = join_strings_as_path([target_path,os.path.basename(file)])
+            target_file_path = join_strings_as_path([target_path, os.path.basename(file)])
             shutil.move(file, target_file_path, copy_function=shutil.copy2)
+    return target_path
 
 def is_str_in_file(input, file_name):
     if isinstance(input, list):

@@ -8,7 +8,7 @@ from utils import utils
 from image_processing.ClassifiersHandler import DarkNetClassifier
 import traceback
 from multiprocessing import Process, Queue, current_process
-
+from collections import deque
 
 class FilesHandlerRT():
     def __init__(self, basepath, run_compression=[], run_NN=[], delete_org=[], debug=False):
@@ -63,6 +63,7 @@ class FilesHandlerRT():
             if run_nn:
                 mov_path = utils.join_strings_as_path([self.basepath, REC_DIR_COMPRESSED_FOR_NN, fname])
                 shutil.move(tmp_full_path, mov_path)
+                LOGGER.info('NN: Put new file in queue -> {}'.format(mov_path))
                 dnc_proc_q.put(mov_path)
             elif delete_file:
                 os.remove(tmp_full_path)
@@ -74,7 +75,8 @@ class FilesHandlerRT():
 
     def update(self):
         utils.make_dir_if_not_exist(utils.join_strings_as_path([self.basepath, 'tmp']))
-        dnc_proc_q = Queue(maxsize=128)
+        process_deque = deque(maxlen=20)
+        process_cnt = 0
         if len(self.run_NN) > 0:
             DNC = DarkNetClassifier().start()
         else:
@@ -103,97 +105,31 @@ class FilesHandlerRT():
                     delete_file = True
 
                 if compress_file or run_nn or delete_file:
-                    process = Process(name='ffmpeg_{}'.format('123'),
-                                      target=self.file_process,
-                                      args=(self.basepath, fname,
-                                            self.ffmpeg_command, dnc_proc_q,
-                                            compress_file, run_nn, delete_file))
-                    process.daemon = False
-                    process.start()
-                    time.sleep(1)  # finish moving file
-                    found_file = True
+                    if np.sum([process.is_alive() for process in process_deque]) < FFMPEG_PARAMS['max_processes']:
+                        process = Process(name='ffmpeg_{}'.format(str(process_cnt)),
+                                          target=self.file_process,
+                                          args=(self.basepath, fname,
+                                                self.ffmpeg_command, object_detection_queue,
+                                                compress_file, run_nn, delete_file))
+                        process.daemon = False
+                        process.start()
+                        process_deque.append(process)
+                        time.sleep(1)  # finish moving file
+                        found_file = True
+                        process_cnt = (process_cnt + 1) % 100
+                    else:
+                        LOGGER.warning('FFMPEG: Too much processes working, waiting... ')
+                        break
 
-            while dnc_proc_q.qsize() > 0:
-                filename = dnc_proc_q.get()
-                LOGGER.info('NN: Put new file in queue -> {}'.format(filename))
-                DNC.Q.put(filename)
+
+            # while dnc_proc_q.qsize() > 0:
+            #     filename = dnc_proc_q.get()
+            #     LOGGER.info('NN: Put new file in queue -> {}'.format(filename))
+            #     DNC.Q.put(filename)
 
             if not found_file:
                 time.sleep(10)
 
-# class FilesHandlerRT_():
-#
-#     def __init__(self, basepath, substring='.', make_mov_vid=False, delete_org=True, debug=False):
-#
-#         self.basepath = basepath
-#         self.substring = substring
-#         self.delete_org = delete_org
-#         self.make_mov_vid = make_mov_vid
-#         self.debug = debug
-#         self.thread_cancelled = False
-#         command_param = 'command_' + FFMPEG_PARAMS['use']
-#         self.ffmpeg_command = FFMPEG_PARAMS[command_param].copy()
-#         self.dirs = utils.DirsHandler(DIRS)
-#         LOGGER.info("FileHandler initialized at {} with substring {}".format(self.basepath, self.substring))
-#
-#     def start(self):
-#         self.thread = Thread(target=self.update)
-#         self.thread.daemon = False
-#         self.thread.start()
-#         return self
-#
-#     def is_alive(self):
-#         return self.thread.isAlive()
-#
-#     def shut_down(self):
-#         self.thread_cancelled = True
-#         # block while waiting for thread to terminate
-#         while self.thread.isAlive():
-#             time.sleep(1)
-#         return True
-#
-#     def update(self):
-#
-#         command = self.ffmpeg_command
-#         basepath = self.basepath
-#         if self.substring == '_mov':
-#             DNC = DarkNetClassifier().start()
-#         while not self.thread_cancelled:
-#             encoding = False
-#             for fname in os.listdir(basepath):
-#                 path = os.path.join(basepath, fname)
-#                 if os.path.isdir(path) or self.substring not in fname:
-#                     # skip directories
-#                     continue
-#                 encoding = True
-#                 time.sleep(1) # finish moving file
-#                 output = '{}.mp4'.format(''.join(fname.split('.mkv')[:-1]))
-#                 input_full_path = utils.join_strings_as_path([basepath, fname])
-#                 output_full_path = utils.join_strings_as_path([basepath, REC_DIR_COMPRESSED, output])
-#                 command[FFMPEG_PARAMS['input_index']] = input_full_path
-#                 command[FFMPEG_PARAMS['output_index']] = output_full_path
-#                 LOGGER.info("START ENCODING: {} --> {}".format(fname, output))
-#                 try:
-#                     if os.stat(input_full_path).st_size > 50000: #at least 50000 Bytes
-#                         subprocess.call(command)
-#                         #if self.make_mov_vid:
-#                         #    self.make_mov_vid_func(basepath, fname)
-#                     else:
-#                         LOGGER.info("FILE {} is almost empty".format(fname))
-#                     LOGGER.info("DONE ENCODING: {} --> {}".format(basepath, output))
-#                     if self.delete_org:
-#                         os.remove(input_full_path)
-#                     else:
-#                         mov_path = utils.join_strings_as_path([basepath, REC_DIR_COMPRESSED_FOR_NN, fname])
-#                         shutil.move(input_full_path, mov_path)
-#                         if self.substring == '_mov':
-#                             DNC.Q.put(mov_path)
-#
-#                 except:
-#                     LOGGER.error("ERROR ENCODING: {} --> {}".format(fname, output))
-#
-#             if not encoding:
-#                 time.sleep(10)
 
 class FilesHandlerNonRT():
     def __init__(self, dir_key, max_history=FILES['max_history_detected'], debug=False):

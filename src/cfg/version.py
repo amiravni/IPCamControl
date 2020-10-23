@@ -1,5 +1,10 @@
-VERSION = '0.8.3.0'
+VERSION = '0.9.0.0'
 Changes = {
+    '0.9.0.0': '''
+    Add Telegram Alerts AlertsHandler.py
+    Move some queues to global multiprocess queues
+    Avoid using more than 6 ffmpeg processes
+    ''',
     '0.8.4.0': '''
     add possibility to save small videos of detections
     ''',

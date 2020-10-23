@@ -1,16 +1,14 @@
 
 from cfg import *
 import time
+import datetime
 from collections import deque
 from utils import utils
 from threading import Thread
 import cv2
 import os
 os.environ["DARKNET_PATH"] = './darknet/'
-#import sys
-#sys.path.append('../../')
 from darknet import darknet
-from queue import Queue
 from utils.VideoHandler import VideoHandler, VideosListHandler
 import traceback
 
@@ -37,7 +35,7 @@ class DarkNetClassifier:
         self.height = darknet.network_height(self.network)
         self.darknet_image = darknet.make_image(self.width, self.height, 3)
         self.thresh = thresh
-        self.Q = Queue(maxsize=queueSize)
+        self.Q = object_detection_queue
 
         self.is_night_vision = None
         self.org_frame = None
@@ -72,7 +70,7 @@ class DarkNetClassifier:
 
             small_image_data = {
                 'img': tmp_img[org_top:org_bottom, org_left:org_right],
-                'lable': label,
+                'label': label,
                 'confidence': confidence,
                 'width': org_right - org_left,
                 'height': org_bottom - org_top,
@@ -81,9 +79,14 @@ class DarkNetClassifier:
 
             if sorted_idxs[cnt] is None or sorted_idxs[cnt] >= len(self.small_imgs):
                 small_image_data['fixed_size'] = [2*small_image_data['height'], 2*small_image_data['width']]
+                small_image_data['final_labels'] = set([small_image_data['label']])
+                small_image_data['video_name'] = None
                 self.small_imgs.append(small_image_data)
             else:
                 small_image_data['fixed_size'] = self.small_imgs[sorted_idxs[cnt]]['fixed_size']
+                small_image_data['final_labels'] = self.small_imgs[sorted_idxs[cnt]]['final_labels']
+                small_image_data['final_labels'].add(small_image_data['label'])
+                small_image_data['video_name'] = self.small_imgs[sorted_idxs[cnt]]['video_name']
                 self.small_imgs[sorted_idxs[cnt]] = small_image_data
 
             cnt += 1
@@ -191,12 +194,13 @@ class DarkNetClassifier:
             for iii, img_data in enumerate(self.small_imgs):
                 name = 'small_{}'.format(str(iii))
                 if not VLH.is_exist(name):
-                    full_path_small = self.get_full_video_path(vid_path, '_' + name)
+                    full_path_small, vid_name = self.get_full_video_path(vid_path, '_' + name)
                     VLH.add_video(name, full_path_small,
                                   img_data['fixed_size'][0],
                                   img_data['fixed_size'][1],
                                   debug=True,
                                   vid_fps=vid_sim_fps)
+                    img_data['video_name'] = vid_name
                 if img_data['new_data']:
                     img = utils.resize_keep_ratio(img_data['img'], img_data['fixed_size'])
                     VLH.add_frame(name, img)
@@ -208,8 +212,9 @@ class DarkNetClassifier:
 
 
     def get_full_video_path(self, vid_path, ext):
+        vid_name = os.path.basename(vid_path).split('.')[0] + ext +'.mkv'
         return utils.join_strings_as_path(
-            [self.dirs.all_dirs['final_detection'], os.path.basename(vid_path).split('.')[0] + ext +'.mkv'])
+            [self.dirs.all_dirs['final_detection'], vid_name]), vid_name
 
     def update(self):
         self.stopped = False
@@ -228,7 +233,7 @@ class DarkNetClassifier:
                     vid_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
                     vid_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
                     vid_sim_fps = int(cap.get(cv2.CAP_PROP_FPS))
-                    full_path = self.get_full_video_path(vid_path, '_NN')
+                    full_path, tmp = self.get_full_video_path(vid_path, '_NN')
                     VLH = VideosListHandler()
                     VLH.add_video('main', full_path, vid_height, vid_width, debug=True, vid_fps=vid_sim_fps)
                     found_counter = 0
@@ -288,15 +293,25 @@ class DarkNetClassifier:
                         LOGGER.info('DARKNET: FOUND SOMETHING working on {}'.format(vid_path))
                         VLH.close_all_videos()
                         if not self.debug:
-                            utils.copy_all_video_refrences(os.path.basename(vid_path).split('_mov')[0],
+                            target_path = utils.copy_all_video_refrences(os.path.basename(vid_path).split('_mov')[0],
                                                            self.dirs, wait_ffmpeg=True)
+                            for iii, img_data in enumerate(self.small_imgs):
+                                final_path = utils.join_strings_as_path([target_path, img_data['video_name']])
+                                date_time = img_data['video_name'].split('_mov')[0]
+                                alert_queue.put({
+                                    'type': 'video',
+                                    'path': final_path,
+                                    'labels': img_data['final_labels'],
+                                    'date': str(datetime.datetime.strptime(date_time, '%Y%m%d_%H%M%S').date()),
+                                    'time': str(datetime.datetime.strptime(date_time, '%Y%m%d_%H%M%S').time())
+                                })
                         if self.debug:
                             print("MEAN:" + str(np.mean(np.array(debug_det), axis=0)))
                             print("STD:" + str(np.std(np.array(debug_det), axis=0)))
                     else:
                         LOGGER.info('DARKNET: FOUND NOTHING working on {}'.format(vid_path))
                         if not self.debug:
-                            VLH.close_all_videos(new_path='delete')
+                            VLH.close_all_videos(move_to_path='delete')
                         else:
                             VLH.close_all_videos()
                     LOGGER.info('DARKNET: Done working on {}'.format(vid_path))
@@ -430,8 +445,10 @@ class FalseAlarmClassifier:
 
 if __name__=='__main__':
     DNC = DarkNetClassifier(debug=True).start()
+    #object_detection_queue.put('../recordings/final_detection/run_1week_oct2020/20201001_092305_3detections/20201001_092305_mov.mkv')
+    object_detection_queue.put('../recordings/detection/before_NN/20201023_162532_mov.mkv')
     #DNC.Q.put('../recordings/detection/before_NN/20201016_104643_mov.mkv')
-    DNC.Q.put('../recordings/final_detection/run_1week_oct2020/20201001_092305_3detections/20201001_092305_mov.mkv')
+    #DNC.Q.put('../recordings/final_detection/run_1week_oct2020/20201001_092305_3detections/20201001_092305_mov.mkv')
     #DNC.Q.put('../recordings/final_detection/Check/20201006_154010_mov.mp4')
     #DNC.Q.put('../recordings/final_detection/20200930_181913/20200930_181913_mov.mkv')
     #DNC.Q.put('../recordings/detection/before_NN/20200930_103412_mov.mkv')

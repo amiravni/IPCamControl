@@ -54,14 +54,14 @@ class VideoHandler:
     def close_video(self):
         self.video.release()
 
-    def close_and_move(self, new_path=''):
+    def close_and_move(self, move_to_path=''):
         self.close_video()
-        if new_path == 'delete':
+        if move_to_path == 'delete':
             os.remove(self.video_path)
             return
-        if len(new_path) > 0:
-            if new_path[-1] != '/':
-                new_path = new_path + '/'
-            shutil.move(self.video_path, new_path + self.video_name)
+        if len(move_to_path) > 0:
+            if move_to_path[-1] != '/':
+                move_to_path = move_to_path + '/'
+            shutil.move(self.video_path, move_to_path + self.video_name)
 
 

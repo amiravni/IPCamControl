@@ -12,8 +12,9 @@ class CaptureHandlerAsProcess:
 
 		self.frame_error_counter = 0
 		self.queue_size = queueSize
-		self.proc_Q = Queue(maxsize=queueSize)
-		self.args = [path, stream_type, sim_start_frame, queueSize, name, fps, True, self.proc_Q]
+		#self.proc_Q = Queue(maxsize=queueSize)
+		#self.args = [path, stream_type, sim_start_frame, queueSize, name, fps, True, self.proc_Q]
+		self.args = [path, stream_type, sim_start_frame, queueSize, name, fps, True]
 		self.process = Process(name='CaptureStream', target=CaptureHandler, args=tuple(self.args))
 
 
@@ -23,8 +24,9 @@ class CaptureHandlerAsProcess:
 				LOGGER.error('Streaming process issue for too long [network dead?] waiting 10 minutes')
 				time.sleep(600)  # Wait 10 minutes
 			self.process.terminate()
-			self.proc_Q = Queue(maxsize=self.queue_size)
-			self.args[-1] = self.proc_Q
+			#self.proc_Q = Queue(maxsize=self.queue_size)
+			#self.args[-1] = self.proc_Q
+			capture_queue = Queue(maxsize=self.queue_size)
 			self.process = Process(name='CaptureStream', target=CaptureHandler, args=self.args)
 		self.process.daemon = False
 		self.process.start()
@@ -34,7 +36,8 @@ class CaptureHandlerAsProcess:
 	def read(self, timeout=5):
 		# return next frame in the queue
 		try:
-			frame = self.proc_Q.get(timeout=timeout)
+			#frame = self.proc_Q.get(timeout=timeout)
+			frame = capture_queue.get(timeout=timeout)
 			self.frame_error_counter = 0
 			return frame
 		except:
@@ -45,7 +48,8 @@ class CaptureHandlerAsProcess:
 					self.start(restart=True)
 					return None
 				LOGGER.warn('Streaming process: didnt get frame for {} seconds'.format(str(timeout)))
-				frame = self.proc_Q.get(timeout=max([0.001, 5.0-timeout]))
+				#frame = self.proc_Q.get(timeout=max([0.001, 5.0-timeout]))
+				frame = capture_queue.get(timeout=max([0.001, 5.0-timeout]))
 				self.frame_error_counter = 0
 				return frame
 			except:
@@ -58,7 +62,8 @@ class CaptureHandlerAsProcess:
 
 	def ext_watchdog(self):
 		if not self.process.is_alive() or \
-				self.proc_Q.qsize() > self.proc_Q._maxsize / 2:
+				capture_queue.qsize() > capture_queue._maxsize / 2:
+				#self.proc_Q.qsize() > self.proc_Q._maxsize / 2:
 			self.frame_error_counter += 1
 			LOGGER.error('Streaming process issue... Restarting')
 			self.start(restart=True)
@@ -90,11 +95,11 @@ class CaptureHandler:
 		# initialize the queue used to store frames read from
 		# the video file
 		self.name = name
-		self.Q = Queue(maxsize=queueSize)
+		#self.Q = Queue(maxsize=queueSize)
 		if is_subprocess:
 			p = current_process()
 			print('Starting Process: {}, {}'.format(str(p.name), str(p.pid)))
-			self.Q = proc_Q
+			#self.Q = proc_Q
 			self.update()
 
 
@@ -121,7 +126,8 @@ class CaptureHandler:
 			if self.stopped:
 				return
 			# otherwise, ensure the queue has room in it
-			if not self.Q.full():
+			#if not self.Q.full():
+			if not capture_queue.full():
 				# read the next frame from the file
 				if self.delay_between_frames > 0:
 					dt = self.delay_between_frames - (time.time() - frame_time)
@@ -135,21 +141,26 @@ class CaptureHandler:
 					self.stop()
 					return
 				# add the frame to the queue
-				self.Q.put(frame)
-				if self.Q.qsize() > GENERAL['queue_warning_length']:
-					LOGGER.warn('CAPTURE {}: Frame Queue size is {}'.format(str(self.name), str(self.Q.qsize())))
+				capture_queue.put(frame)
+				if capture_queue.qsize() > GENERAL['queue_warning_length']:
+					LOGGER.warn('CAPTURE {}: Frame Queue size is {}'.format(str(self.name), str(capture_queue.qsize())))
+
+				#self.Q.put(frame)
+				#if self.Q.qsize() > GENERAL['queue_warning_length']:
+				#	LOGGER.warn('CAPTURE {}: Frame Queue size is {}'.format(str(self.name), str(self.Q.qsize())))
 
 	def read(self, timeout=5):
 		# return next frame in the queue
-		return self.Q.get(timeout=timeout)
+		#return self.Q.get(timeout=timeout)
+		return capture_queue.get(timeout=timeout)
 
 	def is_half_full(self):
-		return self.Q.qsize() > self.Q._maxsize / 2
-
+		#return self.Q.qsize() > self.Q._maxsize / 2
+		return capture_queue.qsize() > capture_queue._maxsize / 2
 
 	def more(self):
 		# return True if there are still frames in the queue
-		return self.Q.qsize() > 0
+		return capture_queue.qsize() > 0
 
 	def stop(self):
 		# indicate that the thread should be stopped

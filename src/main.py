@@ -1,6 +1,7 @@
 import time
 from ImageHandler import ImageHandler, ImageShow
 from FilesHandler import FilesHandlerRT, FilesHandlerNonRT
+from AlertsHandler import TelegramAlerts
 from cfg import *
 import os
 from utils import utils
@@ -29,6 +30,9 @@ if __name__ == '__main__':
     IH = ImageHandler(debug=True).start()
     if SHOW_STREAM:
         IS = ImageShow(IH, debug=True).start()
+
+    TLGA = TelegramAlerts()
+
     LOGGER.info('AMIR IPCAM VERSION {} IS READY'.format(VERSION))
     while True:
         time.sleep(10000)
